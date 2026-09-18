@@ -32,12 +32,12 @@ KEY_BINDINGS = {
     'PLAYPAUSE': 'KEY_PLAYPAUSE',       # Play/pause music (LMS command)
     'PREVIOUSSONG': 'KEY_PREVIOUSSONG', # Play previous song (LMS command)
     'NEXTSONG': 'KEY_NEXTSONG',         # Play next song (LMS command)
-    'UP': 'KEY_UP',                     # Increase treble / tilt / loudness
-    'DOWN': 'KEY_DOWN',                 # Decrease treble / tilt / loudness
-    'LEFT': 'KEY_LEFT',                 # Decrease bass / tilt / loudness
-    'RIGHT': 'KEY_RIGHT',               # Increase bass / tilt / loudness
-    'POWER': 'KEY_POWER',               # Toggle Auto power, Shutdown
-    'ENTER': 'KEY_ENTER',               # Toggle Tone/Tilt gain / Loudness on long press
+    'UP': 'KEY_UP',                     # Increase presence gain
+    'DOWN': 'KEY_DOWN',                 # Decrease presence gain
+    'LEFT': 'KEY_LEFT',                 # Decrease tilt gain
+    'RIGHT': 'KEY_RIGHT',               # Increase tilt gain
+    'POWER': 'KEY_POWER',               # Display brightness,toggle Auto power, Shutdown
+    'ENTER': 'KEY_ENTER',               # Toggle tone gain settings / Loudness display on long press
     'BACK': 'KEY_BACK',                 # Switch to the next DSP configuration (prefixed with "_")
     'HOMEPAGE': 'KEY_HOMEPAGE',         # Switch to the next DSP configuration (prefixed with "|")
 }
@@ -73,6 +73,9 @@ is_waiting_for_sound  = False
 is_key_held           = False
 is_volume_key_held    = False
 last_displayed = None
+blank_volume_when_mute = False
+enter_display_at_press = None  # écran affiché au moment de l'appui sur ENTER (pour distinguer appui court/long sans effet de bord)
+#blank_volume_when_mute = False
 
 # ====================== CONFIGURATION ======================
 
@@ -103,7 +106,14 @@ cdsp.connect()
 config_active = cdsp.config.active()
 
 # Load saved values
-DEFAULT_SETTINGS = {"bass_gain": 0, "treble_gain": 0, "tilt_gain": 0, "loudness_ref": -30, "last_tone_tilt": "tone"}
+DEFAULT_SETTINGS = {
+    "bass_gain": 0,
+    "treble_gain": 0,
+    "tilt_gain": 0,
+    "loudness_ref": -30,
+    "presence_gain": 0,
+    "last_tone_tilt": "tone",
+}
 
 try:
     with open("settings.json") as f: settings = json.load(f) if os.path.getsize("settings.json") > 0 else DEFAULT_SETTINGS
@@ -111,11 +121,16 @@ except (FileNotFoundError, json.JSONDecodeError):
     settings = DEFAULT_SETTINGS
     with open("settings.json", "w") as f: json.dump(settings, f)
 
+# Ensure any missing keys (e.g. upgrading from an older settings.json) fall back to defaults
+for k, v in DEFAULT_SETTINGS.items():
+    settings.setdefault(k, v)
+
 for key, (filt, param) in {
     "bass_gain": ("Bass", "gain"),
     "treble_gain": ("Treble", "gain"),
     "tilt_gain": ("Tilt", "gain"),
     "loudness_ref": ("Loudness", "reference_level"),
+    "presence_gain": ("Presence", "gain"),
 }.items():
     filters = config_active.setdefault("filters", {})
     filters.get(filt, {}).get("parameters", {}).update({param: settings[key]})
@@ -125,6 +140,7 @@ bass_gain_prev = settings["bass_gain"]
 treble_gain_prev = settings["treble_gain"]
 tilt_gain_prev = settings["tilt_gain"]
 loudness_gain_prev = settings["loudness_ref"]
+presence_gain_prev = settings["presence_gain"]
 last_tone_tilt = settings["last_tone_tilt"]
 
 # GPIO setup
@@ -165,16 +181,17 @@ def adc_to_brightness(adc_value):
 
 
 def save_audio_settings(config):
-    defaults = {
-        "bass_gain": 0, "treble_gain": 0, "tilt_gain": 0, "loudness_ref": -30, "last_tone_tilt": "tone"}
+    bass_gain, treble_gain, tilt_gain, loudness_ref = get_bass_treble(config, mode="gain")
+    presence_gain, _ = get_presence_tilt(config, mode="gain")
 
-    gains = get_bass_treble(config, mode="gain")
-
-    keys = ("bass_gain", "treble_gain", "tilt_gain", "loudness_ref")
-    values = list(gains) + [defaults[k] for k in keys[len(gains):]]
-
-    data = dict(zip(keys, values))
-    data["last_tone_tilt"] = last_tone_tilt
+    data = {
+        "bass_gain": bass_gain,
+        "treble_gain": treble_gain,
+        "tilt_gain": tilt_gain,
+        "loudness_ref": loudness_ref,
+        "presence_gain": presence_gain,
+        "last_tone_tilt": last_tone_tilt,
+    }
 
     with open("settings.json", "w") as f:
         json.dump(data, f, indent=4)
@@ -228,6 +245,29 @@ def get_bass_treble(config, mode="gain"):
             return None, None, None, None
 
 
+def get_presence_tilt(config, mode="gain"):
+    """Retrieve Presence (medium) and Tilt filter gain or parameters."""
+    try:
+        filters = config.get('filters', {})
+        presence = filters['Presence']['parameters']
+        tilt = filters['Tilt']['parameters']
+
+        if mode == "gain":
+            return presence.get('gain', 0), tilt.get('gain', 0)
+
+        elif mode == "parameters":
+            return presence, tilt
+
+        else:
+            raise ValueError("Invalid mode : use 'gain' or 'parameters'")
+
+    except (KeyError, TypeError):
+        if mode == "gain":
+            return 0, 0
+        else:
+            return None, None
+
+
 def display_volume_info(current_volume=None, is_muted=None):
     global blank_volume_when_mute, last_displayed
 
@@ -237,8 +277,7 @@ def display_volume_info(current_volume=None, is_muted=None):
         is_muted = cdsp.volume.main_mute()
 
     config_path = cdsp.config.file_path().replace(CONFIG_DIR, '')
-    config_path = config_path.split('.')[0]
-    config_path = config_path.replace("_", "").replace("|", "")
+    config_path = config_path.split('.')[0].replace("_", "").replace("|", "")
     config_path = config_path[:3].ljust(3)
 
     display_vol = max(-99, round(current_volume))
@@ -249,7 +288,14 @@ def display_volume_info(current_volume=None, is_muted=None):
     else:
         blank_volume_when_mute, volume_str = False, f"{config_path}{display_vol:3}"
 
-    tm.write(swap(tm.encode_string(volume_str)))
+    segs = tm.encode_string(volume_str)
+
+    bass_gain, treble_gain, tilt_gain, _ = get_bass_treble(config_active, mode="gain")
+    presence_gain, _ = get_presence_tilt(config_active, mode="gain")
+    if bass_gain or treble_gain or tilt_gain or presence_gain:
+        segs[-4] |= 0x80   # allume le point décimal du dernier digit
+
+    tm.write(swap(segs))
     last_displayed = "volume"
 
 
@@ -269,18 +315,22 @@ def display_loudness_info():
     _, _, _, loudness_ref = get_bass_treble(config_active, mode="gain")
 
     loudness_ref = round(loudness_ref)
-    display_str = f"{loudness_ref} Ld"
+    value_str = "---" if loudness_ref == -99 else f"{loudness_ref}"
+    display_str = f"{value_str} Ld"
 
     tm.write(swap(tm.encode_string(display_str)))
     last_displayed = "loudness"
 
 
+TILT_DB_STEP = 2  # pas réel appliqué au filtre CamillaDSP (dB) par incrément affiché
+
 def display_tilt_info():
     global last_displayed
-    _, _, tilt_gain, _ = get_bass_treble(config_active, mode="gain")
+    presence_gain, tilt_gain = get_presence_tilt(config_active, mode="gain")
 
-    tilt_gain = round(tilt_gain)
-    display_str = f"{tilt_gain:2} Tlt"
+    presence_gain = round(presence_gain)
+    tilt_step = round(tilt_gain / TILT_DB_STEP)  # valeur affichée (-3..+3), gain réel = tilt_step * 2 dB
+    display_str = f"{tilt_step:2}T{presence_gain:2}P"
 
     tm.write(swap(tm.encode_string(display_str)))
     last_displayed = "tilt"
@@ -302,15 +352,22 @@ def handle_arrow_keys(key, config_active, cdsp):
             display_loudness_info()
 
     elif last_displayed == "tilt":
-        _, _, tilt_params, _ = get_bass_treble(config_active, mode="parameters")
-        if tilt_params is not None:
-            tilt_value = tilt_params.get('gain', 0)
-            if key in (KEY_BINDINGS['UP'], KEY_BINDINGS['RIGHT']):
-                tilt_value += 1
-            elif key in (KEY_BINDINGS['DOWN'], KEY_BINDINGS['LEFT']):
-                tilt_value -= 1
-            tilt_value = max(-6, min(+6, tilt_value))
-            tilt_params['gain'] = tilt_value
+        presence_params, tilt_params = get_presence_tilt(config_active, mode="parameters")
+        if presence_params is not None and tilt_params is not None:
+            presence_gain = presence_params.get('gain', 0)
+            tilt_gain = tilt_params.get('gain', 0)
+            if key == KEY_BINDINGS['UP']:
+                presence_gain += 1
+            elif key == KEY_BINDINGS['DOWN']:
+                presence_gain -= 1
+            elif key == KEY_BINDINGS['RIGHT']:
+                tilt_gain += TILT_DB_STEP
+            elif key == KEY_BINDINGS['LEFT']:
+                tilt_gain -= TILT_DB_STEP
+            presence_gain = max(-3, min(+3, presence_gain))
+            tilt_gain = max(-3 * TILT_DB_STEP, min(+3 * TILT_DB_STEP, tilt_gain))  # affiché -3..+3, pas réel 2 dB
+            presence_params['gain'] = presence_gain
+            tilt_params['gain'] = tilt_gain
             cdsp.config.set_active(config_active)
             display_tilt_info()
 
@@ -399,48 +456,39 @@ def get_repeat_speed(volume, direction, exponent=2.0, pivot=-50):
 
 def handle_enter_press(last_displayed):
     bass_params, treble_params, tilt_params, loudness_params = get_bass_treble(config_active, mode="parameters")
+    presence_params, _ = get_presence_tilt(config_active, mode="parameters")
 
-    global bass_gain_prev, bass_gain_now
-    global treble_gain_prev, treble_gain_now
-    global tilt_gain_prev, tilt_gain_now
-    global loudness_gain_prev, loudness_gain_now
+    global bass_gain_prev, treble_gain_prev, tilt_gain_prev, loudness_gain_prev, presence_gain_prev
 
     if last_displayed == "tone" and bass_params is not None and treble_params is not None:
         if bass_params['gain'] == treble_params['gain'] == 0:
             bass_params['gain'], treble_params['gain'] = bass_gain_prev, treble_gain_prev
-            bass_gain_now, treble_gain_now = bass_gain_prev, treble_gain_prev
             bass_gain_prev, treble_gain_prev = 0, 0
         else:
             bass_gain_prev, treble_gain_prev = bass_params['gain'], treble_params['gain']
             bass_params['gain'] = treble_params['gain'] = 0
-            bass_gain_now = treble_gain_now = 0
         cdsp.config.set_active(config_active)
         display_tone_info()
 
-    elif last_displayed == "tilt" and tilt_params is not None:
-        if tilt_params['gain'] == 0:
-            tilt_params['gain'] = tilt_gain_prev
-            tilt_gain_now = tilt_gain_prev
-            tilt_gain_prev = 0
+    elif last_displayed == "tilt" and presence_params is not None and tilt_params is not None:
+        if presence_params['gain'] == tilt_params['gain'] == 0:
+            presence_params['gain'], tilt_params['gain'] = presence_gain_prev, tilt_gain_prev
+            presence_gain_prev, tilt_gain_prev = 0, 0
         else:
-            tilt_gain_prev = tilt_params['gain']
-            tilt_params['gain'] = 0
-            tilt_gain_now = 0
+            presence_gain_prev, tilt_gain_prev = presence_params['gain'], tilt_params['gain']
+            presence_params['gain'] = tilt_params['gain'] = 0
         cdsp.config.set_active(config_active)
         display_tilt_info()
 
     elif last_displayed == "loudness" and loudness_params is not None:
         if loudness_params['reference_level'] == -99:
             loudness_params['reference_level'] = loudness_gain_prev
-            loudness_gain_now = loudness_gain_prev
             loudness_gain_prev = -99
         else:
             loudness_gain_prev = loudness_params['reference_level']
             loudness_params['reference_level'] = -99
-            loudness_gain_now = -99
         cdsp.config.set_active(config_active)
         display_loudness_info()
-
 
 async def adc_reader_loop():
     global ser, last_level
@@ -467,6 +515,7 @@ async def adc_reader_loop():
 async def change_config(cdsp, config_pattern):
     global config_active
     bass_gain, treble_gain, tilt_gain, loudness_ref = get_bass_treble(config_active, mode="gain")
+    presence_gain, _ = get_presence_tilt(config_active, mode="gain")
     config_files = glob.glob(config_pattern)
     current_config = cdsp.config.file_path()
     if not config_files:
@@ -478,7 +527,8 @@ async def change_config(cdsp, config_pattern):
     new_config_data = cdsp.config.read_and_parse_file(new_config_path)
     filters = new_config_data.get('filters', {})
     for value, (filt, param) in {bass_gain:("Bass","gain"), treble_gain:("Treble","gain"),
-                                  tilt_gain:("Tilt","gain"), loudness_ref:("Loudness","reference_level")}.items():
+                                  tilt_gain:("Tilt","gain"), loudness_ref:("Loudness","reference_level"),
+                                  presence_gain:("Presence","gain")}.items():
         if value is not None: filters.get(filt, {}).get("parameters", {}).update({param: value})
 
     config_dir = os.path.dirname(os.path.abspath(new_config_path))
@@ -629,7 +679,7 @@ async def tv_off_action():
 
 
 async def remote_events(device):
-    global last_displayed, key_hold_counter, is_key_held, is_volume_key_held, loudness_gain_prev, last_tone_tilt
+    global last_displayed, key_hold_counter, is_key_held, is_volume_key_held, loudness_gain_prev, last_tone_tilt, enter_display_at_press
 
     bass_gain_prev = treble_gain_prev  = br_direction = last_repeat_time = 0
 
@@ -691,6 +741,12 @@ async def remote_events(device):
                             await change_config(cdsp, CONFIG_DIR + '|*')
 
 
+                        elif key == KEY_BINDINGS['ENTER']:
+                            # Mémorise l'écran affiché AVANT tout changement, pour l'action au relâchement (reset/restore)
+                            enter_display_at_press = last_displayed
+                            if last_displayed == "volume":
+                                display_loudness_info()  # accès immédiat, sans délai
+
 
                     if attrib.keystate == 2:  # Key held down
 
@@ -728,11 +784,11 @@ async def remote_events(device):
 
                         elif key == KEY_BINDINGS['POWER']:
                             key_hold_counter += 1
-                            if key_hold_counter == 400:
+                            if key_hold_counter == 2:
+                                await toggle_power()
+                            elif key_hold_counter == 400:
                                 lgpio.gpio_write(h, POWER_GPIO, lgpio.LOW)
-                                #await change_config(cdsp, CONFIG_DIR + '_*')
                                 tm.write(swap(tm.encode_string(" HALT ")))
-                               # await asyncio.sleep(1)
                                 os.system("sudo shutdown -h now")
 
 
@@ -740,9 +796,7 @@ async def remote_events(device):
                             key_hold_counter += 1
                             if key_hold_counter == 15:
 
-                                if last_displayed == "volume":
-                                    display_loudness_info()
-                                elif last_displayed in ("tone", "tilt"):
+                                if last_displayed in ("tone", "tilt"):
                                     last_tone_tilt = "tilt" if last_displayed == "tone" else "tone"
                                     (display_tilt_info if last_tone_tilt == "tilt" else display_tone_info)()
 
@@ -752,10 +806,8 @@ async def remote_events(device):
 
 
                         if key == KEY_BINDINGS['ENTER'] and key_hold_counter < 15:
-                            handle_enter_press(last_displayed)
+                            handle_enter_press(enter_display_at_press)
 
-                        elif key == KEY_BINDINGS['POWER'] and key_hold_counter > 10:
-                            await toggle_power()
 
                         elif key == KEY_BINDINGS['PLAYPAUSE'] and key_hold_counter < 10:
                             send_lms_command("pause")
@@ -829,4 +881,3 @@ if __name__ == "__main__":
     asyncio.run(main())
 
 #EOF
-
