@@ -134,7 +134,7 @@ EOL
 # Function to install Lyrion Media Server & Squeezelite
 install_lyrion_and_squeezelite() {
     echo "🎵 Installing Lyrion Media Server (v9.1.1)..."
-    wget https://downloads.lms-community.org/LyrionMusicServer-9.1.1/lyrionmusicserver_9.1.1_arm.deb -O ~/lyrionmusicserver_arm.deb
+    wget https://downloads.lms-community.org/LyrionMusicServer_v9.1.1/lyrionmusicserver_9.1.1_arm.deb -O ~/lyrionmusicserver_arm.deb
     sudo dpkg -i ~/lyrionmusicserver_arm.deb || sudo apt --fix-broken install -y
 
     echo "🔊 Installing Squeezelite..."
