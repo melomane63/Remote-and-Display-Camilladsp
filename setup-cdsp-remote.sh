@@ -187,18 +187,28 @@ EOL
 # Function to pair Bluetooth Remote
 pair_bluetooth_remote() {
     echo "🔗 Pairing Bluetooth Remote..."
+    
+    # S'assurer que le Bluetooth n'est pas bloqué et relancer le service
     sudo rfkill unblock bluetooth
     sudo systemctl restart bluetooth
     sleep 2
+
+    # Allumer le Bluetooth
+    bluetoothctl power on
     
     echo "Please set your Bluetooth remote in pairing mode now."
     read -p "Press Enter to start scanning for Bluetooth devices..."
-    bluetoothctl power on
-    bluetoothctl scan on &
-    SCAN_PID=$!
     
+    echo "🔍 Scanning for Bluetooth devices for 10 seconds..."
+    (
+        echo "scan on"
+        sleep 10
+        echo "scan off"
+        echo "exit"
+    ) | bluetoothctl > /dev/null 2>&1 &
+
+    # Attendre la fin du scan (les 10 secondes)
     sleep 10
-    kill $SCAN_PID
     
     read -p "Enter the MAC address of your Bluetooth Remote: " BT_MAC
     bluetoothctl pair $BT_MAC
@@ -206,7 +216,6 @@ pair_bluetooth_remote() {
     bluetoothctl connect $BT_MAC
     echo "✅ Bluetooth Remote paired and connected!"
 }
-
 # Function to mount USB drive
 mount_usb_drive() {
     echo "💾 Setting up USB Drive auto-mount..."
