@@ -132,10 +132,10 @@ EOL
 }
 
 # Function to install Lyrion Media Server & Squeezelite
-install_lyrion() {
-    echo "🎵 Installing Lyrion Media Server..."
-    wget https://downloads.lms-community.org/LMS-v8.5.2/logitechmediaserver_8.5.2_all.deb -O ~/logitechmediaserver_8.5.2_all.deb
-    sudo dpkg -i ~/logitechmediaserver_8.5.2_all.deb || sudo apt --fix-broken install -y
+install_lyrion_and_squeezelite() {
+    echo "🎵 Installing Lyrion Media Server (v9.1.1)..."
+    wget https://downloads.lms-community.org/LyrionMusicServer-9.1.1/lyrionmusicserver_9.1.1_arm.deb -O ~/lyrionmusicserver_arm.deb
+    sudo dpkg -i ~/lyrionmusicserver_arm.deb || sudo apt --fix-broken install -y
 
     echo "🔊 Installing Squeezelite..."
     sudo apt install -y squeezelite
@@ -241,7 +241,7 @@ install_everything() {
     upgrade_system
     configure_boot_config
     install_camilladsp
-    install_lyrion
+    install_lyrion_and_squeezelite
     install_bluetooth_remote
     mount_usb_drive
     pair_bluetooth_remote
@@ -274,7 +274,7 @@ while true; do
         2) upgrade_system ;;
         3) configure_boot_config ;;
         4) install_camilladsp ;;
-        5) install_lyrion ;;
+        5) install_lyrion_and_squeezelite ;;
         6) install_bluetooth_remote ;;
         7) pair_bluetooth_remote ;;
         8) mount_usb_drive ;;
