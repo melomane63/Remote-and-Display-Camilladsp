@@ -189,7 +189,7 @@ pair_bluetooth_remote() {
     echo "🔗 Pairing Bluetooth Remote..."
     echo "Please set your Bluetooth remote in pairing mode now."
     read -p "Press Enter to start scanning for Bluetooth devices..."
-    
+    bluetoothctl power on
     bluetoothctl scan on &
     SCAN_PID=$!
     
