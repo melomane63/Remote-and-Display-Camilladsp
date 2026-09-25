@@ -184,6 +184,7 @@ EOL
     sudo systemctl start remote.service
 }
 
+
 # Function to pair Bluetooth Remote
 pair_bluetooth_remote() {
     echo "🔗 Pairing Bluetooth Remote..."
@@ -199,23 +200,36 @@ pair_bluetooth_remote() {
     echo "Please set your Bluetooth remote in pairing mode now."
     read -p "Press Enter to start scanning for Bluetooth devices..."
     
-    echo "🔍 Scanning for Bluetooth devices for 10 seconds..."
+    echo "🔍 Scanning for Bluetooth devices for 10 seconds (Look for your remote's MAC address)..."
+    
+    # Lancement du scan en direct dans le terminal
     (
         echo "scan on"
         sleep 10
         echo "scan off"
         echo "exit"
-    ) | bluetoothctl > /dev/null 2>&1 &
+    ) | bluetoothctl
 
-    # Attendre la fin du scan (les 10 secondes)
-    sleep 10
+    echo ""
+    echo "--- Fin du scan ---"
     
-    read -p "Enter the MAC address of your Bluetooth Remote: " BT_MAC
+    # Réinitialisation de la variable au cas où
+    BT_MAC=""
+    
+    # Boucle pour s'assurer qu'une adresse MAC est saisie
+    while [ -z "$BT_MAC" ]; do
+        read -p "Enter the MAC address of your Bluetooth Remote (e.g. XX:XX:XX:XX:XX:XX): " BT_MAC
+        if [ -z "$BT_MAC" ]; then
+            echo "⚠️ Address cannot be empty. Please try again."
+        fi
+    done
+
     bluetoothctl pair $BT_MAC
     bluetoothctl trust $BT_MAC
     bluetoothctl connect $BT_MAC
     echo "✅ Bluetooth Remote paired and connected!"
 }
+
 # Function to mount USB drive
 mount_usb_drive() {
     echo "💾 Setting up USB Drive auto-mount..."
