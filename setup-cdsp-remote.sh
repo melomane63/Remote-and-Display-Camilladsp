@@ -149,42 +149,53 @@ install_lyrion_and_squeezelite() {
 
     sudo systemctl restart squeezelite
 }
-
-# Function to install Bluetooth Remote Script & LED Display module
+# Function to install Bluetooth Remote Script & LED Display module with venv
 install_bluetooth_remote() {
-    echo "🎮 Installing Bluetooth Remote Control & LED module..."
-    sudo apt install -y python3-evdev python3-websocket python3-lgpio python3-pip
+    echo "🎮 Installing Bluetooth Remote Control & LED module in venv..."
+    sudo apt install -y python3-pip python3-lgpio python3-evdev python3-websocket python3-venv
+
+    # Créer l'environnement virtuel dans /opt/venv s'il n'existe pas
+    if [ ! -d "/opt/venv" ]; then
+        sudo python3 -m venv /opt/venv
+    fi
+
+    # Mettre à jour pip dans le venv et installer les dépendances nécessaires si besoin
+    sudo /opt/venv/bin/pip install --upgrade pip
 
     echo "📥 Downloading remote.py and tm1637_lgpio.py from GitHub..."
     wget -q https://raw.githubusercontent.com/melomane63/Remote-and-Display-Camilladsp/main/remote.py -O ~/remote.py
     wget -q https://raw.githubusercontent.com/melomane63/tm1637_lgpio/main/tm1637_lgpio.py -O ~/tm1637_lgpio.py
 
-    cat > ~/remote.service <<EOL
+    # Création du fichier de service systemd exact que vous souhaitez
+    sudo tee /etc/systemd/system/remote.service > /dev/null <<EOL
 [Unit]
-Description=Bluetooth Remote Control for CamillaDSP
-After=bluetooth.target network.target
-StartLimitIntervalSec=0
+Description=CamillaDSP Remote control, led display & power trigger
+After=default.target
 
 [Service]
-Type=simple
 User=$USER
-WorkingDirectory=/home/$USER
-ExecStart=/usr/bin/python3 /home/$USER/remote.py
+Type=simple
+WorkingDirectory=~
+ExecStart=/opt/venv/bin/python3 remote.py
 Restart=on-failure
 RestartSec=5
-KillMode=mixed
+KillMode=control-group
+KillSignal=SIGTERM
 TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=remote
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 EOL
 
-    sudo mv ~/remote.service /lib/systemd/system/remote.service
     sudo systemctl daemon-reload
     sudo systemctl enable remote.service
     sudo systemctl start remote.service
-    echo "✅ Remote & LED module installed and started!"
+    echo "✅ Remote service configured and started with /opt/venv/bin/python3 !"
 }
+
 
 # Function to pair Bluetooth Remote using bluetuith
 pair_bluetooth_remote() {
