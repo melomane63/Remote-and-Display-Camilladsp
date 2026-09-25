@@ -185,9 +185,9 @@ EOL
 }
 
 
-# Function to pair Bluetooth Remote
+# Function to pair Bluetooth Remote using bluetuith
 pair_bluetooth_remote() {
-    echo "🔗 Pairing Bluetooth Remote..."
+    echo "🔗 Preparing Bluetooth Remote pairing interface..."
     
     # S'assurer que le Bluetooth n'est pas bloqué et relancer le service
     sudo rfkill unblock bluetooth
@@ -196,40 +196,30 @@ pair_bluetooth_remote() {
 
     # Allumer le Bluetooth
     bluetoothctl power on
-    
-    echo "Please set your Bluetooth remote in pairing mode now."
-    read -p "Press Enter to start scanning for Bluetooth devices..."
-    
-    echo "🔍 Scanning for Bluetooth devices for 10 seconds (Look for your remote's MAC address)..."
-    
-    # Lancement du scan en direct dans le terminal
-    (
-        echo "scan on"
-        sleep 10
-        echo "scan off"
-        echo "exit"
-    ) | bluetoothctl
+
+    # Vérifier si bluetuith est installé, sinon l'installer
+    if ! command -v bluetuith &> /dev/null; then
+        echo "📦 Installing bluetuith for visual Bluetooth management..."
+        sudo apt update
+        sudo apt install -y golang-go git
+        go install github.com/darkhz/bluetuith@latest
+        sudo ln -sf ~/go/bin/bluetuith /usr/bin/bluetuith
+    fi
 
     echo ""
-    echo "--- Fin du scan ---"
-    
-    # Réinitialisation de la variable au cas où
-    BT_MAC=""
-    
-    # Boucle pour s'assurer qu'une adresse MAC est saisie
-    while [ -z "$BT_MAC" ]; do
-        read -p "Enter the MAC address of your Bluetooth Remote (e.g. XX:XX:XX:XX:XX:XX): " BT_MAC
-        if [ -z "$BT_MAC" ]; then
-            echo "⚠️ Address cannot be empty. Please try again."
-        fi
-    done
+    echo "💡 Instructions :"
+    echo "   1. L'interface bluetuith va s'ouvrir."
+    echo "   2. Mettez votre télécommande en mode appairage (LED clignotante)."
+    echo "   3. Utilisez les flèches pour trouver votre télécommande, appuyez sur Entrée pour la Pairer, puis la Connecter."
+    echo "   4. Appuyez sur 'q' pour quitter l'interface une fois terminé."
+    echo ""
+    read -p "Appuyez sur Entrée pour lancer bluetuith..."
 
-    bluetoothctl pair $BT_MAC
-    bluetoothctl trust $BT_MAC
-    bluetoothctl connect $BT_MAC
-    echo "✅ Bluetooth Remote paired and connected!"
+    # Lancer l'interface visuelle
+    bluetuith
+    
+    echo "✅ Bluetooth setup interface closed."
 }
-
 # Function to mount USB drive
 mount_usb_drive() {
     echo "💾 Setting up USB Drive auto-mount..."
