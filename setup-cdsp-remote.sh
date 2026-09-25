@@ -187,6 +187,10 @@ EOL
 # Function to pair Bluetooth Remote
 pair_bluetooth_remote() {
     echo "🔗 Pairing Bluetooth Remote..."
+    sudo rfkill unblock bluetooth
+    sudo systemctl restart bluetooth
+    sleep 2
+    
     echo "Please set your Bluetooth remote in pairing mode now."
     read -p "Press Enter to start scanning for Bluetooth devices..."
     bluetoothctl power on
