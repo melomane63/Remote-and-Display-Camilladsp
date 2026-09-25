@@ -234,16 +234,31 @@ pair_bluetooth_remote() {
 mount_usb_drive() {
     echo "💾 Setting up USB Drive auto-mount..."
     sudo mkdir -p /mnt/usb
-    read -p "Enter the UUID of your USB drive (use 'blkid' to find it): " USB_UUID
     
-    if ! grep -q "$USB_UUID" /etc/fstab; then
-        echo "UUID=$USB_UUID /mnt/usb auto defaults,nofail,x-systemd.device-timeout=1,noatime 0 0" | sudo tee -a /etc/fstab
+    # Récupérer automatiquement l'UUID de la première partition de type vfat, ext4 ou ntfs sur /dev/sda
+    USB_UUID=$(sudo blkid -s UUID -o value /dev/sda1 2>/dev/null || true)
+    
+    if [ -z "$USB_UUID" ]; then
+        echo "⚠️ Aucune clé USB détectée automatiquement sur /dev/sda1."
+        read -p "Entrez manuellement l'UUID de votre clé USB : " USB_UUID
+    else
+        echo "✅ Clé USB détectée automatiquement avec l'UUID : $USB_UUID"
     fi
     
-    sudo mount -a
-    echo "✅ USB Drive mounted at /mnt/usb!"
-}
+    if [ -n "$USB_UUID" ]; then
+        # Nettoyer l'ancienne entrée pour /mnt/usb si elle existe déjà pour éviter les doublons
+        sudo sed -i 's|.* /mnt/usb .*||g' /etc/fstab
+        sudo sed -i '/^$/d' /etc/fstab # Supprimer les lignes vides créées
 
+        # Ajouter la nouvelle configuration
+        echo "UUID=$USB_UUID /mnt/usb auto defaults,nofail,x-systemd.device-timeout=1,noatime 0 0" | sudo tee -a /etc/fstab
+        
+        sudo mount -a
+        echo "✅ USB Drive mounted at /mnt/usb with UUID $USB_UUID!"
+    else
+        echo "❌ Erreur : Aucun UUID valide n'a pu être configuré."
+    fi
+}
 # Function to set sound card output
 set_sound_card() {
     echo "🔊 Available Sound Cards:"
