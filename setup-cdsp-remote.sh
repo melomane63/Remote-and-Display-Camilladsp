@@ -21,29 +21,23 @@ configure_boot_config() {
     # Backup before modifying
     sudo cp "$CONFIG_FILE" "${CONFIG_FILE}.bak"
 
-    # 1. Nettoyer / commenter les options non désirées de l'install fraîche
+    # 1. Nettoyer les doublons potentiels ou anciennes lignes de configuration
+    sudo sed -i '/dtparam=audio=/d' "$CONFIG_FILE"
+    sudo sed -i '/dtoverlay=gpio-poweroff/d' "$CONFIG_FILE"
+    sudo sed -i '/dtoverlay=gpio-shutdown/d' "$CONFIG_FILE"
+    sudo sed -i '/enable_uart=/d' "$CONFIG_FILE"
+    sudo sed -i '/gpio=12=ip,pu/d' "$CONFIG_FILE"
     sudo sed -i 's/^camera_auto_detect=/#camera_auto_detect=/' "$CONFIG_FILE"
     sudo sed -i 's/^display_auto_detect=/#display_auto_detect=/' "$CONFIG_FILE"
     sudo sed -i 's/^dtoverlay=vc4-kms-v3d/#dtoverlay=vc4-kms-v3d/' "$CONFIG_FILE"
 
-    # Fonction interne pour s'assurer qu'une ligne exacte existe dans le fichier
-    ensure_line() {
-        local line="$1"
-        # Si la ligne (ou sa version commentée) n'est pas déjà présente, on l'ajoute
-        if ! sudo grep -qxF "$line" "$CONFIG_FILE"; then
-            echo "$line" | sudo tee -a "$CONFIG_FILE" > /dev/null
-        fi
-    }
+    # 2. S'assurer qu'il y a bien une section [all] propre à la fin, et y injecter les paramètres une seule fois
+    if ! sudo grep -q "\[all\]" "$CONFIG_FILE"; then
+        echo -e "\n[all]" | sudo tee -a "$CONFIG_FILE" > /dev/null
+    fi
 
-    # 2. Forcer l'application des paramètres requis (audio off, overlays, gpio, uart)
-    # On s'assure d'abord de neutraliser les anciennes valeurs d'audio s'il y en a
-    sudo sed -i 's/^dtparam=audio=/#dtparam=audio=/' "$CONFIG_FILE"
-    
-    ensure_line "dtparam=audio=off"
-    ensure_line "dtoverlay=gpio-poweroff,gpiopin=21,active_low=1"
-    ensure_line "dtoverlay=gpio-shutdown,gpio_pin=20,active_low=0,gpio_pull=down"
-    ensure_line "enable_uart=1"
-    ensure_line "gpio=12=ip,pu"
+    # Ajout propre des paramètres requis sous [all]
+    sudo sed -i '/\[all\]/a dtparam=audio=off\ndtoverlay=gpio-poweroff,gpiopin=21,active_low=1\ndtoverlay=gpio-shutdown,gpio_pin=20,active_low=0,gpio_pull=down\nenable_uart=1\ngpio=12=ip,pu' "$CONFIG_FILE"
 
     # 3. Nettoyage de la console série dans cmdline.txt
     CMDLINE_FILE="/boot/firmware/cmdline.txt"
@@ -52,7 +46,7 @@ configure_boot_config() {
         sudo sed -i 's/console=serial0,[0-9]* //' "$CMDLINE_FILE"
     fi
 
-    echo "1✅ /boot/firmware/config.txt et /boot/firmware/cmdline.txt mis à jour avec succès !"
+    echo "1✅ /boot/firmware/config.txt et /boot/firmware/cmdline.txt nettoyés et mis à jour proprement !"
 }
 
 # Function to install CamillaDSP & CamillaGUI
