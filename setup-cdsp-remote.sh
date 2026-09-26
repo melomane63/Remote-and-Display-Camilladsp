@@ -21,41 +21,38 @@ configure_boot_config() {
     # Backup before modifying
     sudo cp "$CONFIG_FILE" "${CONFIG_FILE}.bak"
 
-    set_config_param() {
-        local param="$1"
-        local key="${param%%=*}"
-        # Supprime le pré-requis de commentaire s'il y en a un pour la recherche
-        key="${key#\#}"
-        
-        if sudo grep -qE "^#*${key}=" "$CONFIG_FILE"; then
-            sudo sed -i "s|^#*${key}=.*|${param}|" "$CONFIG_FILE"
-        else
-            echo "$param" | sudo tee -a "$CONFIG_FILE" > /dev/null
+    # 1. Nettoyer / commenter les options non désirées de l'install fraîche
+    sudo sed -i 's/^camera_auto_detect=/#camera_auto_detect=/' "$CONFIG_FILE"
+    sudo sed -i 's/^display_auto_detect=/#display_auto_detect=/' "$CONFIG_FILE"
+    sudo sed -i 's/^dtoverlay=vc4-kms-v3d/#dtoverlay=vc4-kms-v3d/' "$CONFIG_FILE"
+
+    # Fonction interne pour s'assurer qu'une ligne exacte existe dans le fichier
+    ensure_line() {
+        local line="$1"
+        # Si la ligne (ou sa version commentée) n'est pas déjà présente, on l'ajoute
+        if ! sudo grep -qxF "$line" "$CONFIG_FILE"; then
+            echo "$line" | sudo tee -a "$CONFIG_FILE" > /dev/null
         fi
     }
 
-    # 1. Désactiver l'auto-détection et le pilote graphique par défaut (comme l'ancienne install)
-    set_config_param "#camera_auto_detect=1"
-    set_config_param "#display_auto_detect=1"
-    set_config_param "#dtoverlay=vc4-kms-v3d"
+    # 2. Forcer l'application des paramètres requis (audio off, overlays, gpio, uart)
+    # On s'assure d'abord de neutraliser les anciennes valeurs d'audio s'il y en a
+    sudo sed -i 's/^dtparam=audio=/#dtparam=audio=/' "$CONFIG_FILE"
+    
+    ensure_line "dtparam=audio=off"
+    ensure_line "dtoverlay=gpio-poweroff,gpiopin=21,active_low=1"
+    ensure_line "dtoverlay=gpio-shutdown,gpio_pin=20,active_low=0,gpio_pull=down"
+    ensure_line "enable_uart=1"
+    ensure_line "gpio=12=ip,pu"
 
-    # 2. Paramètres matériels et GPIOs spécifiques
-    set_config_param "dtoverlay=gpio-poweroff,gpiopin=21,active_low=1"
-    set_config_param "dtoverlay=gpio-shutdown,gpio_pin=20,active_low=0,gpio_pull=down"
-    set_config_param "enable_uart=1"
-    set_config_param "gpio=12=ip,pu"
-
-    # 3. Audio désactivé pour laisser la place au DAC externe
-    set_config_param "dtparam=audio=off"
-
-    # 4. Nettoyage de la console série dans cmdline.txt
+    # 3. Nettoyage de la console série dans cmdline.txt
     CMDLINE_FILE="/boot/firmware/cmdline.txt"
     if [ -f "$CMDLINE_FILE" ]; then
         sudo cp "$CMDLINE_FILE" "${CMDLINE_FILE}.bak"
         sudo sed -i 's/console=serial0,[0-9]* //' "$CMDLINE_FILE"
     fi
 
-    echo "✅ /boot/firmware/config.txt et /boot/firmware/cmdline.txt mis à jour avec succès !"
+    echo "1✅ /boot/firmware/config.txt et /boot/firmware/cmdline.txt mis à jour avec succès !"
 }
 
 # Function to install CamillaDSP & CamillaGUI
