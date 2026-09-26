@@ -46,7 +46,7 @@ configure_boot_config() {
         sudo sed -i 's/console=serial0,[0-9]* //' "$CMDLINE_FILE"
     fi
 
-    echo "1✅ /boot/firmware/config.txt et /boot/firmware/cmdline.txt nettoyés et mis à jour proprement !"
+    echo "✅ /boot/firmware/config.txt et /boot/firmware/cmdline.txt nettoyés et mis à jour proprement !"
 }
 
 # Function to install CamillaDSP & CamillaGUI
