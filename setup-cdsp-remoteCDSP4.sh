@@ -192,8 +192,8 @@ install_bluetooth_remote() {
 
     # pycamilladsp (client Python du demon CamillaDSP) - installe via Git, commit precis
     # trouve dans l'audit. C'est le paquet manquant de l'ancienne version de cette fonction.
-    sudo /opt/venv/bin/pip install "git+https://github.com/HEnquist/pycamilladsp.git@15d9b7c434b8e795bcad25783b75d5354acdb840"
-
+    sudo /opt/venv/bin/pip install "git+https://github.com/HEnquist/pycamilladsp.git"
+    
     echo "📥 Downloading remote.py and tm1637_lgpio.py from GitHub..."
     wget -q https://raw.githubusercontent.com/melomane63/Remote-and-Display-Camilladsp/main/remote.py -O ~/remote.py
     # tm1637_lgpio.py place directement dans le venv - chemin calcule dynamiquement
