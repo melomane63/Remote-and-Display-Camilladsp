@@ -23,38 +23,39 @@ configure_boot_config() {
 
     set_config_param() {
         local param="$1"
-        if sudo grep -q "^#*${param%%=*}=" "$CONFIG_FILE"; then
-            sudo sed -i "s|^#*${param%%=*}=.*|${param}|" "$CONFIG_FILE"
+        local key="${param%%=*}"
+        # Supprime le pré-requis de commentaire s'il y en a un pour la recherche
+        key="${key#\#}"
+        
+        if sudo grep -qE "^#*${key}=" "$CONFIG_FILE"; then
+            sudo sed -i "s|^#*${key}=.*|${param}|" "$CONFIG_FILE"
         else
             echo "$param" | sudo tee -a "$CONFIG_FILE" > /dev/null
         fi
     }
 
+    # 1. Désactiver l'auto-détection et le pilote graphique par défaut (comme l'ancienne install)
+    set_config_param "#camera_auto_detect=1"
+    set_config_param "#display_auto_detect=1"
+    set_config_param "#dtoverlay=vc4-kms-v3d"
+
+    # 2. Paramètres matériels et GPIOs spécifiques
     set_config_param "dtoverlay=gpio-poweroff,gpiopin=21,active_low=1"
     set_config_param "dtoverlay=gpio-shutdown,gpio_pin=20,active_low=0,gpio_pull=down"
     set_config_param "enable_uart=1"
+    set_config_param "gpio=12=ip,pu"
 
-    # Desactive la sortie audio embarquee du Pi (jack 3.5mm + HDMI) : sinon elle peut
-    # prendre l'index hw:0 a la place de votre DAC externe, ce qui decale la numerotation
-    # des cartes son et casse une config CamillaDSP qui pointe sur un index fixe.
-    # Match specifique sur "dtparam=audio=" uniquement (pas "dtparam=" generique) pour ne
-    # pas toucher d'autres parametres dtparam (i2s, spi, etc.) qui pourraient deja exister.
-    if sudo grep -q "^#*dtparam=audio=" "$CONFIG_FILE"; then
-        sudo sed -i 's/^#*dtparam=audio=.*/dtparam=audio=off/' "$CONFIG_FILE"
-    else
-        echo "dtparam=audio=off" | sudo tee -a "$CONFIG_FILE" > /dev/null
+    # 3. Audio désactivé pour laisser la place au DAC externe
+    set_config_param "dtparam=audio=off"
+
+    # 4. Nettoyage de la console série dans cmdline.txt
+    CMDLINE_FILE="/boot/firmware/cmdline.txt"
+    if [ -f "$CMDLINE_FILE" ]; then
+        sudo cp "$CMDLINE_FILE" "${CMDLINE_FILE}.bak"
+        sudo sed -i 's/console=serial0,[0-9]* //' "$CMDLINE_FILE"
     fi
 
-    # Desactive la console serie : sinon un getty reste attache a /dev/ttyS0 (regenere
-    # automatiquement a chaque boot par systemd-getty-generator tant que "console=serial0"
-    # figure dans cmdline.txt), qui garde alors le groupe "tty" (droits 620) au lieu de
-    # "dialout" (droits 660), et remote.py ne peut pas ouvrir le port (Permission denied).
-    # raspi-config nonint do_serial_cons s'est avere peu fiable : on edite cmdline.txt directement.
-    CMDLINE_FILE="/boot/firmware/cmdline.txt"
-    sudo cp "$CMDLINE_FILE" "${CMDLINE_FILE}.bak"
-    sudo sed -i 's/console=serial0,[0-9]* //' "$CMDLINE_FILE"
-
-    echo "✅ /boot/firmware/config.txt et /boot/firmware/cmdline.txt mis à jour !"
+    echo "✅ /boot/firmware/config.txt et /boot/firmware/cmdline.txt mis à jour avec succès !"
 }
 
 # Function to install CamillaDSP & CamillaGUI
