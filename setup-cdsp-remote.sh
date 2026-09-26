@@ -34,6 +34,17 @@ configure_boot_config() {
     set_config_param "dtoverlay=gpio-shutdown,gpio_pin=20,active_low=0,gpio_pull=down"
     set_config_param "enable_uart=1"
 
+    # Desactive la sortie audio embarquee du Pi (jack 3.5mm + HDMI) : sinon elle peut
+    # prendre l'index hw:0 a la place de votre DAC externe, ce qui decale la numerotation
+    # des cartes son et casse une config CamillaDSP qui pointe sur un index fixe.
+    # Match specifique sur "dtparam=audio=" uniquement (pas "dtparam=" generique) pour ne
+    # pas toucher d'autres parametres dtparam (i2s, spi, etc.) qui pourraient deja exister.
+    if sudo grep -q "^#*dtparam=audio=" "$CONFIG_FILE"; then
+        sudo sed -i 's/^#*dtparam=audio=.*/dtparam=audio=off/' "$CONFIG_FILE"
+    else
+        echo "dtparam=audio=off" | sudo tee -a "$CONFIG_FILE" > /dev/null
+    fi
+
     # Desactive la console serie : sinon un getty reste attache a /dev/ttyS0 (regenere
     # automatiquement a chaque boot par systemd-getty-generator tant que "console=serial0"
     # figure dans cmdline.txt), qui garde alors le groupe "tty" (droits 620) au lieu de
