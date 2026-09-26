@@ -125,6 +125,26 @@ except (FileNotFoundError, json.JSONDecodeError):
 for k, v in DEFAULT_SETTINGS.items():
     settings.setdefault(k, v)
 
+def apply_filter_param(filters, filt, param, value):
+    """Met a jour un parametre de filtre CamillaDSP (ex: gain de 'Bass') si et seulement si
+    ce filtre existe reellement dans la config active et est correctement defini.
+    Ne fait rien (silencieusement) si le filtre est absent ou vide : permet a remote.py de
+    fonctionner avec des configs CamillaDSP qui n'ont pas tous les filtres
+    Bass/Treble/Tilt/Loudness/Presence, au lieu de planter au demarrage ou au changement
+    de config."""
+    f = filters.get(filt)
+    if not isinstance(f, dict):
+        return
+    params = f.get("parameters")
+    if not isinstance(params, dict):
+        return
+    params[param] = value
+
+
+filters = config_active.get("filters")
+if not isinstance(filters, dict):
+    filters = {}
+    config_active["filters"] = filters
 for key, (filt, param) in {
     "bass_gain": ("Bass", "gain"),
     "treble_gain": ("Treble", "gain"),
@@ -132,8 +152,7 @@ for key, (filt, param) in {
     "loudness_ref": ("Loudness", "reference_level"),
     "presence_gain": ("Presence", "gain"),
 }.items():
-    filters = config_active.setdefault("filters", {})
-    filters.get(filt, {}).get("parameters", {}).update({param: settings[key]})
+    apply_filter_param(filters, filt, param, settings[key])
 
 cdsp.config.set_active(config_active)
 bass_gain_prev = settings["bass_gain"]
@@ -525,11 +544,14 @@ async def change_config(cdsp, config_pattern):
     if new_config_path == current_config: return
 
     new_config_data = cdsp.config.read_and_parse_file(new_config_path)
-    filters = new_config_data.get('filters', {})
+    filters = new_config_data.get('filters')
+    if not isinstance(filters, dict):
+        filters = {}
+        new_config_data['filters'] = filters
     for value, (filt, param) in {bass_gain:("Bass","gain"), treble_gain:("Treble","gain"),
                                   tilt_gain:("Tilt","gain"), loudness_ref:("Loudness","reference_level"),
                                   presence_gain:("Presence","gain")}.items():
-        if value is not None: filters.get(filt, {}).get("parameters", {}).update({param: value})
+        if value is not None: apply_filter_param(filters, filt, param, value)
 
     config_dir = os.path.dirname(os.path.abspath(new_config_path))
     for f in filters.values():
