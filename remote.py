@@ -166,8 +166,7 @@ h = lgpio.gpiochip_open(0)  # Open the GPIO chip
 lgpio.gpio_claim_output(h, POWER_GPIO)  # Configure GPIO as output
 lgpio.gpio_write(h, POWER_GPIO, 1)  # Set initial state to HIGH
 # Configure GPIO 12 as input with internal pull-up
-lgpio.gpio_claim_input(h, TV_GPIO)
-
+lgpio.gpio_claim_input(h, TV_GPIO, lgpio.SET_PULL_UP)
 # TM1637 Display Configuration
 tm = TM1637(clk=CLK, dio=DIO)
 tm.write(tm.encode_string(" " *6))
