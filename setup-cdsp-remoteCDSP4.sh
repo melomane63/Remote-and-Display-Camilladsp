@@ -143,20 +143,46 @@ EOL
 
     # Create default config
     cat > ~/camilladsp/configs/_Setup.yml <<EOL
+description: null
 devices:
-  samplerate: 44100
-  chunksize: 1024
-  queuelimit: 4
+  adjust_period: null
   capture:
-    type: Alsa
     channels: 2
-    device: "hw:Loopback,1,0"
-    format: S32LE
+    device: plughw:Loopback,1,0
+    format: null
+    labels: null
+    link_mute_control: null
+    link_volume_control: null
+    stop_on_inactive: null
+    type: Alsa
+  capture_samplerate: 44100
+  chunksize: 1024
+  enable_rate_adjust: null
+  multithreaded: null
   playback:
-    type: Alsa
     channels: 2
-    device: "hw:0,0"
-    format: S32LE
+    device: plughw:Loopback,0,1
+    format: null
+    type: Alsa
+  queuelimit: null
+  rate_measure_interval: null
+  resampler:
+    profile: Balanced
+    type: AsyncSinc
+  samplerate: 48000
+  silence_threshold: null
+  silence_timeout: null
+  stop_on_rate_change: null
+  target_level: null
+  volume_limit: null
+  volume_ramp_time: null
+  worker_threads: null
+filters: {}
+mixers: {}
+pipeline: []
+processors: {}
+title: null
+
 EOL
 
     # Load ALSA loopback module
