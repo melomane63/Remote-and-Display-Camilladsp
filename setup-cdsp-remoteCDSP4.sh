@@ -186,49 +186,50 @@ install_lyrion_and_squeezelite() {
 }
 
 # Function to install Bluetooth Remote Script & LED Display module with venv
-# Reconstruit d'apres l'audit reel du disque (pip freeze, chemins, service) : le venv doit
-# heriter des paquets systeme (python-apt, distro, ssh-import-id ne s'installent pas via
-# pip seul), pyserial + pycamilladsp (via Git) sont necessaires a remote.py et etaient
-# absents de l'ancienne version de cette fonction.
+# Rebuilt from the actual disk audit (pip freeze, paths, service): the venv must
+# inherit system packages (python-apt, distro, ssh-import-id can't be installed via
+# pip alone), pyserial + pycamilladsp (via Git) are required by remote.py and were
+# missing from the previous version of this function.
 install_bluetooth_remote() {
     echo "🎮 Installing Remote Control & LED module in venv..."
 
-    # Groupes necessaires : serie (dialout), GPIO (gpio), lecture manette/telecommande (input),
-    # SPI/I2C au cas ou d'autres peripheriques en dependent
+    # Groups required: serial (dialout), GPIO (gpio), reading the remote/gamepad (input),
+    # SPI/I2C in case other peripherals depend on them
     sudo usermod -aG dialout,gpio,input,spi,i2c "$USER"
 
-    # Venv avec heritage des paquets systeme (gpiozero, numpy, scipy, python-apt, distro,
-    # ssh-import-id, etc. fournis par l'image Raspberry Pi OS)
+    # Venv inheriting system packages (gpiozero, numpy, scipy, python-apt, distro,
+    # ssh-import-id, etc. provided by the Raspberry Pi OS image)
     if [ ! -d "/opt/venv" ]; then
         sudo mkdir -p /opt/venv
         sudo python3 -m venv --system-site-packages /opt/venv
     fi
     sudo /opt/venv/bin/pip install --upgrade pip
 
-    # Dependances STRICTEMENT necessaires a remote.py (portables, testees Bookworm + Trixie)
+    # Dependencies STRICTLY required by remote.py (portable, tested on Bookworm + Trixie)
     sudo /opt/venv/bin/pip install evdev==1.6.1 lgpio==0.2.2.0 pyserial==3.5
 
-    # Paquets herites du systeme (gpiozero, numpy, scipy, python-apt, distro, ssh-import-id...)
-    # via --system-site-packages : on ne les pin PAS ici, leurs versions dependent de la
-    # distro (Bookworm vs Trixie) et python-apt/distro/ssh-import-id ne sont pas de vrais
-    # paquets PyPI portables (lies a libapt-pkg du systeme) - forcer leur version echoue
-    # souvent a la compilation sur une distro differente de celle ou la version a ete figee.
+    # Packages inherited from the system (gpiozero, numpy, scipy, python-apt, distro,
+    # ssh-import-id...) via --system-site-packages: their versions are NOT pinned here,
+    # as they depend on the distro (Bookworm vs Trixie) and python-apt/distro/ssh-import-id
+    # are not true portable PyPI packages (they're tied to the system's libapt-pkg) - forcing
+    # their version often fails to build on a distro different from the one it was pinned on.
 
-    # pycamilladsp (client Python du demon CamillaDSP) - installe via Git, commit precis
-    # trouve dans l'audit. C'est le paquet manquant de l'ancienne version de cette fonction.
+    # pycamilladsp (Python client for the CamillaDSP daemon) - installed via Git, at the
+    # exact commit found during the audit. This is the package missing from the previous
+    # version of this function.
     sudo /opt/venv/bin/pip install "git+https://github.com/HEnquist/pycamilladsp.git"
     
     echo "📥 Downloading remote.py and tm1637_lgpio.py from GitHub..."
     wget -q https://raw.githubusercontent.com/melomane63/Remote-and-Display-Camilladsp/main/remote.py -O ~/remote.py
-    # tm1637_lgpio.py place directement dans le venv - chemin calcule dynamiquement
-    # (python3.11 sur Bookworm, python3.13 sur Trixie, etc.)
-    # /opt/venv appartient a root -> telechargement dans /tmp puis copie avec sudo
+    # tm1637_lgpio.py placed directly in the venv - path computed dynamically
+    # (python3.11 on Bookworm, python3.13 on Trixie, etc.)
+    # /opt/venv is owned by root -> download to /tmp then copy with sudo
     PYVER=$(/opt/venv/bin/python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
     wget -q https://raw.githubusercontent.com/melomane63/tm1637_lgpio/main/tm1637_lgpio.py -O /tmp/tm1637_lgpio.py
     sudo cp /tmp/tm1637_lgpio.py "/opt/venv/lib/python${PYVER}/site-packages/tm1637_lgpio.py"
     rm -f /tmp/tm1637_lgpio.py
 
-    # Création du fichier de service systemd exact que vous souhaitez
+    # Create the exact systemd service file you want
     sudo tee /etc/systemd/system/remote.service > /dev/null <<EOL
 [Unit]
 Description=CamillaDSP Remote control, led display & power trigger
@@ -263,15 +264,15 @@ EOL
 pair_bluetooth_remote() {
     echo "🔗 Preparing Bluetooth Remote pairing interface..."
     
-    # S'assurer que le Bluetooth n'est pas bloqué et relancer le service
+    # Make sure Bluetooth isn't blocked and restart the service
     sudo rfkill unblock bluetooth
     sudo systemctl restart bluetooth
     sleep 2
 
-    # Allumer le Bluetooth
+    # Turn Bluetooth on
     bluetoothctl power on
 
-    # Vérifier si bluetuith est installé, sinon l'installer
+    # Check whether bluetuith is installed, otherwise install it
     if ! command -v bluetuith &> /dev/null; then
         echo "📦 Installing bluetuith for visual Bluetooth management..."
         sudo apt update
@@ -281,15 +282,15 @@ pair_bluetooth_remote() {
     fi
 
     echo ""
-    echo "💡 Instructions :"
-    echo "   1. L'interface bluetuith va s'ouvrir."
-    echo "   2. Mettez votre télécommande en mode appairage (LED clignotante)."
-    echo "   3. Utilisez les flèches pour trouver votre télécommande, appuyez sur Entrée pour la Pairer, puis la Connecter."
-    echo "   4. Appuyez sur 'q' pour quitter l'interface une fois terminé."
+    echo "💡 Instructions:"
+    echo "   1. The bluetuith interface will open."
+    echo "   2. Put your remote in pairing mode (blinking LED)."
+    echo "   3. Use the arrow keys to find your remote, press Enter to Pair it, then Connect it."
+    echo "   4. Press 'q' to quit the interface once done."
     echo ""
-    read -p "Appuyez sur Entrée pour lancer bluetuith..."
+    read -p "Press Enter to launch bluetuith..."
 
-    # Lancer l'interface visuelle
+    # Launch the visual interface
     bluetuith
     
     echo "✅ Bluetooth setup interface closed."
@@ -300,39 +301,39 @@ mount_usb_drive() {
     echo "💾 Setting up USB Drive auto-mount..."
     sudo mkdir -p /mnt/usb
     
-    # Récupérer automatiquement l'UUID de la première partition sur /dev/sda1
+    # Automatically retrieve the UUID of the first partition on /dev/sda1
     USB_UUID=$(sudo blkid -s UUID -o value /dev/sda1 2>/dev/null || true)
     
     if [ -z "$USB_UUID" ]; then
-        echo "⚠️ Aucune clé USB détectée automatiquement sur /dev/sda1."
-        read -p "Entrez manuellement l'UUID de votre clé USB : " USB_UUID
+        echo "⚠️ No USB drive automatically detected on /dev/sda1."
+        read -p "Manually enter your USB drive's UUID: " USB_UUID
     else
-        echo "✅ Clé USB détectée automatiquement avec l'UUID : $USB_UUID"
+        echo "✅ USB drive automatically detected with UUID: $USB_UUID"
     fi
     
     if [ -n "$USB_UUID" ]; then
-        # Nettoyer l'ancienne entrée pour /mnt/usb si elle existe déjà
+        # Clean up the old entry for /mnt/usb if it already exists
         sudo sed -i 's|.* /mnt/usb .*||g' /etc/fstab
         sudo sed -i '/^$/d' /etc/fstab
 
-        # Ajouter la nouvelle configuration
+        # Add the new configuration
         echo "UUID=$USB_UUID /mnt/usb auto defaults,nofail,x-systemd.device-timeout=1,noatime 0 0" | sudo tee -a /etc/fstab
         
         sudo mount -a
         echo "✅ USB Drive mounted at /mnt/usb with UUID $USB_UUID!"
     else
-        echo "❌ Erreur : Aucun UUID valide n'a pu être configuré."
+        echo "❌ Error: No valid UUID could be configured."
     fi
 }
 
 # Function to set sound card output
 set_sound_card() {
-    echo "🔊 Lancement d'alsamixer pour configurer la carte son..."
-    echo "   (Echap ou 'q' pour quitter une fois les reglages faits)"
+    echo "🔊 Launching alsamixer to configure the sound card..."
+    echo "   (Esc or 'q' to quit once the settings are done)"
     alsamixer
-    echo "💾 Sauvegarde des reglages ALSA..."
+    echo "💾 Saving ALSA settings..."
     sudo alsactl store
-    echo "✅ Reglages ALSA sauvegardes !"
+    echo "✅ ALSA settings saved!"
 }
 
 # Function to reboot
