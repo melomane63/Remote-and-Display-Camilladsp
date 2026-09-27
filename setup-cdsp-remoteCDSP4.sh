@@ -300,25 +300,77 @@ pair_bluetooth_remote() {
 mount_usb_drive() {
     echo "💾 Setting up USB Drive auto-mount..."
     sudo mkdir -p /mnt/usb
-    
-    # Automatically retrieve the UUID of the first partition on /dev/sda1
-    USB_UUID=$(sudo blkid -s UUID -o value /dev/sda1 2>/dev/null || true)
-    
-    if [ -z "$USB_UUID" ]; then
-        echo "⚠️ No USB drive automatically detected on /dev/sda1."
+ 
+    # Discover every removable block device and list its partitions.
+    # We look at /sys/block/*/removable instead of hardcoding /dev/sda1,
+    # so this works correctly even with several USB drives plugged in,
+    # or if the OS names the drive /dev/sdb, /dev/sdc, etc.
+    CANDIDATES=()
+    for dev_path in /sys/block/*/; do
+        dev_name=$(basename "$dev_path")
+        removable_flag="${dev_path}removable"
+        if [ -f "$removable_flag" ] && [ "$(cat "$removable_flag")" = "1" ]; then
+            for part in /dev/${dev_name}*[0-9]; do
+                [ -b "$part" ] && CANDIDATES+=("$part")
+            done
+        fi
+    done
+ 
+    USB_UUID=""
+ 
+    if [ ${#CANDIDATES[@]} -eq 0 ]; then
+        # Nothing detected automatically: fall back to manual entry
+        echo "⚠️ No removable USB drive automatically detected."
         read -p "Manually enter your USB drive's UUID: " USB_UUID
+ 
+    elif [ ${#CANDIDATES[@]} -eq 1 ]; then
+        # Exactly one candidate: use it directly
+        PART="${CANDIDATES[0]}"
+        USB_UUID=$(sudo blkid -s UUID -o value "$PART" 2>/dev/null || true)
+        if [ -n "$USB_UUID" ]; then
+            echo "✅ USB drive automatically detected: $PART (UUID=$USB_UUID)"
+        else
+            echo "⚠️ Found $PART but could not read its UUID."
+            read -p "Manually enter your USB drive's UUID: " USB_UUID
+        fi
+ 
     else
-        echo "✅ USB drive automatically detected with UUID: $USB_UUID"
+        # Several candidates: show a menu and let the user pick
+        echo "🔎 Multiple USB drives detected:"
+        echo ""
+        UUID_LIST=()
+        i=1
+        for part in "${CANDIDATES[@]}"; do
+            uuid=$(sudo blkid -s UUID -o value "$part" 2>/dev/null || echo "")
+            label=$(sudo blkid -s LABEL -o value "$part" 2>/dev/null || echo "")
+            size=$(lsblk -no SIZE "$part" 2>/dev/null | xargs || echo "?")
+            UUID_LIST+=("$uuid")
+            printf "  %d) %-12s size=%-8s label=%-15s uuid=%s\n" "$i" "$part" "$size" "${label:-<none>}" "${uuid:-<none>}"
+            i=$((i+1))
+        done
+        echo ""
+        read -p "Choose the drive to mount [1-${#CANDIDATES[@]}]: " choice
+ 
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#CANDIDATES[@]}" ]; then
+            USB_UUID="${UUID_LIST[$((choice-1))]}"
+            echo "✅ Selected: ${CANDIDATES[$((choice-1))]} (UUID=$USB_UUID)"
+        else
+            echo "⚠️ Invalid choice."
+            read -p "Manually enter your USB drive's UUID: " USB_UUID
+        fi
     fi
-    
+ 
     if [ -n "$USB_UUID" ]; then
+        # Backup fstab before touching it
+        sudo cp /etc/fstab "/etc/fstab.bak.$(date +%Y%m%d%H%M%S)"
+ 
         # Clean up the old entry for /mnt/usb if it already exists
         sudo sed -i 's|.* /mnt/usb .*||g' /etc/fstab
         sudo sed -i '/^$/d' /etc/fstab
-
+ 
         # Add the new configuration
         echo "UUID=$USB_UUID /mnt/usb auto defaults,nofail,x-systemd.device-timeout=1,noatime 0 0" | sudo tee -a /etc/fstab
-        
+ 
         sudo mount -a
         echo "✅ USB Drive mounted at /mnt/usb with UUID $USB_UUID!"
     else
