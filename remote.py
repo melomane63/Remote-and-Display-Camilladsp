@@ -74,8 +74,7 @@ is_key_held           = False
 is_volume_key_held    = False
 last_displayed = None
 blank_volume_when_mute = False
-enter_display_at_press = None  # écran affiché au moment de l'appui sur ENTER (pour distinguer appui court/long sans effet de bord)
-#blank_volume_when_mute = False
+enter_display_at_press = None  # screen displayed at the moment ENTER is pressed (to distinguish short/long press without side effects)
 
 # ====================== CONFIGURATION ======================
 
@@ -126,12 +125,12 @@ for k, v in DEFAULT_SETTINGS.items():
     settings.setdefault(k, v)
 
 def apply_filter_param(filters, filt, param, value):
-    """Met a jour un parametre de filtre CamillaDSP (ex: gain de 'Bass') si et seulement si
-    ce filtre existe reellement dans la config active et est correctement defini.
-    Ne fait rien (silencieusement) si le filtre est absent ou vide : permet a remote.py de
-    fonctionner avec des configs CamillaDSP qui n'ont pas tous les filtres
-    Bass/Treble/Tilt/Loudness/Presence, au lieu de planter au demarrage ou au changement
-    de config."""
+    """Updates a CamillaDSP filter parameter (e.g. 'Bass' gain) if and only if
+    this filter actually exists in the active config and is properly defined.
+    Does nothing (silently) if the filter is missing or empty: this allows remote.py to
+    work with CamillaDSP configs that don't have all the
+    Bass/Treble/Tilt/Loudness/Presence filters, instead of crashing at startup or on
+    config change."""
     f = filters.get(filt)
     if not isinstance(f, dict):
         return
@@ -166,7 +165,7 @@ last_tone_tilt = settings["last_tone_tilt"]
 h = lgpio.gpiochip_open(0)  # Open the GPIO chip
 lgpio.gpio_claim_output(h, POWER_GPIO)  # Configure GPIO as output
 lgpio.gpio_write(h, POWER_GPIO, 1)  # Set initial state to HIGH
-# Configurer GPIO 12 comme entrée avec pull-up interne
+# Configure GPIO 12 as input with internal pull-up
 lgpio.gpio_claim_input(h, TV_GPIO)
 
 # TM1637 Display Configuration
@@ -174,7 +173,7 @@ tm = TM1637(clk=CLK, dio=DIO)
 tm.write(tm.encode_string(" " *6))
 tm.brightness(last_level)
 
-# ====================== FONCTIONS   =============================
+# ====================== FUNCTIONS   =============================
 
 def adc_to_brightness(adc_value):
     global last_level
@@ -312,7 +311,7 @@ def display_volume_info(current_volume=None, is_muted=None):
     bass_gain, treble_gain, tilt_gain, _ = get_bass_treble(config_active, mode="gain")
     presence_gain, _ = get_presence_tilt(config_active, mode="gain")
     if bass_gain or treble_gain or tilt_gain or presence_gain:
-        segs[-4] |= 0x80   # allume le point décimal du dernier digit
+        segs[-4] |= 0x80   # turn on the decimal point of the last digit
 
     tm.write(swap(segs))
     last_displayed = "volume"
@@ -341,14 +340,14 @@ def display_loudness_info():
     last_displayed = "loudness"
 
 
-TILT_DB_STEP = 2  # pas réel appliqué au filtre CamillaDSP (dB) par incrément affiché
+TILT_DB_STEP = 2  # actual step applied to the CamillaDSP filter (dB) per displayed increment
 
 def display_tilt_info():
     global last_displayed
     presence_gain, tilt_gain = get_presence_tilt(config_active, mode="gain")
 
     presence_gain = round(presence_gain)
-    tilt_step = round(tilt_gain / TILT_DB_STEP)  # valeur affichée (-3..+3), gain réel = tilt_step * 2 dB
+    tilt_step = round(tilt_gain / TILT_DB_STEP)  # displayed value (-3..+3), actual gain = tilt_step * 2 dB
     display_str = f"{tilt_step:2}T{presence_gain:2}P"
 
     tm.write(swap(tm.encode_string(display_str)))
@@ -384,7 +383,7 @@ def handle_arrow_keys(key, config_active, cdsp):
             elif key == KEY_BINDINGS['LEFT']:
                 tilt_gain -= TILT_DB_STEP
             presence_gain = max(-3, min(+3, presence_gain))
-            tilt_gain = max(-3 * TILT_DB_STEP, min(+3 * TILT_DB_STEP, tilt_gain))  # affiché -3..+3, pas réel 2 dB
+            tilt_gain = max(-3 * TILT_DB_STEP, min(+3 * TILT_DB_STEP, tilt_gain))  # displayed -3..+3, actual step 2 dB
             presence_params['gain'] = presence_gain
             tilt_params['gain'] = tilt_gain
             cdsp.config.set_active(config_active)
@@ -703,7 +702,6 @@ async def tv_off_action():
 async def remote_events(device):
     global last_displayed, key_hold_counter, is_key_held, is_volume_key_held, loudness_gain_prev, last_tone_tilt, enter_display_at_press
 
-    #bass_gain_prev = treble_gain_prev  = br_direction = last_repeat_time = 0
     last_repeat_time = 0
     while True:
         try:
@@ -764,10 +762,10 @@ async def remote_events(device):
 
 
                         elif key == KEY_BINDINGS['ENTER']:
-                            # Mémorise l'écran affiché AVANT tout changement, pour l'action au relâchement (reset/restore)
+                            # Store the displayed screen BEFORE any change, for the action on release (reset/restore)
                             enter_display_at_press = last_displayed
                             if last_displayed == "volume":
-                                display_loudness_info()  # accès immédiat, sans délai
+                                display_loudness_info()  # immediate access, no delay
 
 
                     if attrib.keystate == 2:  # Key held down
