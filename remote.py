@@ -703,8 +703,8 @@ async def tv_off_action():
 async def remote_events(device):
     global last_displayed, key_hold_counter, is_key_held, is_volume_key_held, loudness_gain_prev, last_tone_tilt, enter_display_at_press
 
-    bass_gain_prev = treble_gain_prev  = br_direction = last_repeat_time = 0
-
+    #bass_gain_prev = treble_gain_prev  = br_direction = last_repeat_time = 0
+    last_repeat_time = 0
     while True:
         try:
             # Process events asynchronously from the device
