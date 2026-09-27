@@ -21,7 +21,7 @@ configure_boot_config() {
     # Backup before modifying
     sudo cp "$CONFIG_FILE" "${CONFIG_FILE}.bak"
 
-    # 1. Nettoyer les doublons potentiels ou anciennes lignes de configuration
+    # 1. Clean up potential duplicates or old configuration lines
     sudo sed -i '/dtparam=audio=/d' "$CONFIG_FILE"
     sudo sed -i '/dtoverlay=gpio-poweroff/d' "$CONFIG_FILE"
     sudo sed -i '/dtoverlay=gpio-shutdown/d' "$CONFIG_FILE"
@@ -31,22 +31,46 @@ configure_boot_config() {
     sudo sed -i 's/^display_auto_detect=/#display_auto_detect=/' "$CONFIG_FILE"
     sudo sed -i 's/^dtoverlay=vc4-kms-v3d/#dtoverlay=vc4-kms-v3d/' "$CONFIG_FILE"
 
-    # 2. S'assurer qu'il y a bien une section [all] propre à la fin, et y injecter les paramètres une seule fois
+    # 2. Make sure a clean [all] section exists at the end, and inject the parameters only once
     if ! sudo grep -q "\[all\]" "$CONFIG_FILE"; then
         echo -e "\n[all]" | sudo tee -a "$CONFIG_FILE" > /dev/null
     fi
 
-    # Ajout propre des paramètres requis sous [all]
-    sudo sed -i '/\[all\]/a dtparam=audio=off\ndtoverlay=gpio-poweroff,gpiopin=21,active_low=1\ndtoverlay=gpio-shutdown,gpio_pin=20,active_low=0,gpio_pull=down\nenable_uart=1\ngpio=12=ip,pu' "$CONFIG_FILE"
+    # Cleanly add the required parameters under [all]
+    # Note: the GPIO 12 (TV_GPIO) pull-up is now handled directly in remote.py
+    # via lgpio.gpio_claim_input(h, TV_GPIO, lgpio.SET_PULL_UP), so gpio=12=ip,pu is no longer needed here.
+    sudo sed -i '/\[all\]/a dtparam=audio=off\ndtoverlay=gpio-poweroff,gpiopin=21,active_low=1\ndtoverlay=gpio-shutdown,gpio_pin=20,active_low=0,gpio_pull=down\nenable_uart=1' "$CONFIG_FILE"
 
-    # 3. Nettoyage de la console série dans cmdline.txt
+    # 3. Clean up the serial console in cmdline.txt
     CMDLINE_FILE="/boot/firmware/cmdline.txt"
+    CMDLINE_MODIFIED=false
     if [ -f "$CMDLINE_FILE" ]; then
         sudo cp "$CMDLINE_FILE" "${CMDLINE_FILE}.bak"
+        if grep -q 'console=serial0,[0-9]*' "$CMDLINE_FILE"; then
+            CMDLINE_MODIFIED=true
+        fi
         sudo sed -i 's/console=serial0,[0-9]* //' "$CMDLINE_FILE"
     fi
 
-    echo "✅ /boot/firmware/config.txt et /boot/firmware/cmdline.txt nettoyés et mis à jour proprement !"
+    echo "✅ /boot/firmware/config.txt and /boot/firmware/cmdline.txt cleaned up and updated!"
+    echo ""
+    echo "📋 Summary of changes made:"
+    echo "  - Backups created     : ${CONFIG_FILE}.bak"
+    [ -f "$CMDLINE_FILE" ] && echo "                          ${CMDLINE_FILE}.bak"
+    echo "  - camera_auto_detect      : disabled (commented out)"
+    echo "  - display_auto_detect     : disabled (commented out)"
+    echo "  - dtoverlay=vc4-kms-v3d   : disabled (commented out)"
+    echo "  - dtparam=audio           : disabled (audio=off)"
+    echo "  - dtoverlay=gpio-poweroff : added (GPIO 21, active_low=1)"
+    echo "  - dtoverlay=gpio-shutdown : added (GPIO 20, active_low=0, pull=down)"
+    echo "  - enable_uart             : enabled (enable_uart=1)"
+    echo "  - gpio=12=ip,pu           : removed (pull-up now handled in remote.py)"
+    if [ "$CMDLINE_MODIFIED" = true ]; then
+        echo "  - cmdline.txt             : serial console (console=serial0,...) removed"
+    else
+        echo "  - cmdline.txt             : no serial console found (nothing to change)"
+    fi
+    echo ""
 }
 
 # Function to install CamillaDSP & CamillaGUI
