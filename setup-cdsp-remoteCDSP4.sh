@@ -298,7 +298,7 @@ pair_bluetooth_remote() {
 
 # Function to mount USB drive
 mount_usb_drive() {
-    echo "💾 Setting up USB Drive auto-mount..."
+    echo "111💾 Setting up USB Drive auto-mount..."
     sudo mkdir -p /mnt/usb
  
     # Discover every removable block device and list its partitions.
