@@ -120,18 +120,18 @@ EOL
     # Create default config
     cat > ~/camilladsp/configs/_Setup.yml <<EOL
 devices:
-  samplerate: 44100
-  chunksize: 1024
+  samplerate: 48000
+  chunksize: 512
   queuelimit: 4
   capture:
     type: Alsa
     channels: 2
-    device: "hw:Loopback,1,0"
+    device: "plughw:Loopback,0,0"
     format: S32LE
   playback:
     type: Alsa
     channels: 2
-    device: "hw:0,0"
+    device: "plughw:0,0"
     format: S32LE
 EOL
 
