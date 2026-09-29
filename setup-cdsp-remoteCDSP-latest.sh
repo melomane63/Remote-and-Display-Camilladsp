@@ -286,10 +286,14 @@ EOL
 }
 
 
-# Function to pair Bluetooth Remote using bluetuith
+# Function to pair Bluetooth Remote using bluetuith and select the device
 pair_bluetooth_remote() {
+    # Path of remote.py (edit if the installer copies it elsewhere) and Python of the venv
+    REMOTE_SCRIPT="${REMOTE_SCRIPT:-$HOME/remote.py}"
+    VENV_PYTHON="${VENV_PYTHON:-/opt/venv/bin/python3}"
+
     echo "🔗 Preparing Bluetooth Remote pairing interface..."
-    
+
     # Make sure Bluetooth isn't blocked and restart the service
     sudo rfkill unblock bluetooth
     sudo systemctl restart bluetooth
@@ -318,9 +322,105 @@ pair_bluetooth_remote() {
 
     # Launch the visual interface
     bluetuith
-    
+
     echo "✅ Bluetooth setup interface closed."
-    /opt/venv/bin/python3 -m evdev.evtest
+
+    # --- Integration of select_remote_device logic below ---
+    echo ""
+    echo "🔍 Detecting input devices..."
+    echo "   The remote should now be connected. Press a key on it if needed."
+    read -rp "Press Enter to scan..."
+
+    # One line per device: path <TAB> name <TAB> supported keys (best match first)
+    local -a lines
+    mapfile -t lines < <("$VENV_PYTHON" - <<'EOF'
+import evdev
+from evdev import ecodes as e
+
+names = ['KEY_VOLUMEDOWN', 'KEY_VOLUMEUP', 'KEY_MUTE', 'KEY_PLAYPAUSE', 'KEY_PREVIOUSSONG',
+         'KEY_NEXTSONG', 'KEY_UP', 'KEY_DOWN', 'KEY_LEFT', 'KEY_RIGHT', 'KEY_POWER',
+         'KEY_ENTER', 'KEY_BACK', 'KEY_HOMEPAGE']
+codes = {e.ecodes[n] for n in names}
+
+rows = []
+for p in evdev.list_devices():
+    d = evdev.InputDevice(p)
+    keys = d.capabilities().get(e.EV_KEY, [])
+    rows.append((len(codes & set(keys)), p, d.name))
+
+for score, p, name in sorted(rows, key=lambda r: (-r[0], r[1])):
+    print(f"{p}\t{name}\t{score}/{len(codes)}")
+EOF
+)
+
+    if [ "${#lines[@]}" -eq 0 ]; then
+        echo "❌ No input device found (is the remote connected? is evdev installed in the venv?)"
+        return 1
+    fi
+
+    echo ""
+    echo "Input devices found (best match for the remote first):"
+    local i dev_path dev_name dev_keys
+    for i in "${!lines[@]}"; do
+        IFS=$'\t' read -r dev_path dev_name dev_keys <<< "${lines[$i]}"
+        printf "   %d) %-26s %-8s %s\n" "$((i + 1))" "$dev_name" "$dev_keys" "$dev_path"
+    done
+    echo ""
+
+    local choice
+    while true; do
+        read -rp "Choose your remote [1-${#lines[@]}] (Enter = 1): " choice
+        choice="${choice:-1}"
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#lines[@]} )); then
+            break
+        fi
+        echo "Invalid choice."
+    done
+
+    IFS=$'\t' read -r dev_path dev_name dev_keys <<< "${lines[$((choice - 1))]}"
+    echo "➡️️  Selected: $dev_name ($dev_keys keys)"
+    if (( ${dev_keys%%/*} < 10 )); then
+        echo "⚠️  This device supports few of the remote keys: check that it is really the remote."
+    fi
+
+    if [ ! -f "$REMOTE_SCRIPT" ]; then
+        echo "⚠️  $REMOTE_SCRIPT not found. Set this line manually in remote.py:"
+        echo "   REMOTE_NAME = \"$dev_name\""
+        return 1
+    fi
+
+    # Replace only the value of REMOTE_NAME; the rest of the line (comment) is kept
+    if "$VENV_PYTHON" - "$REMOTE_SCRIPT" "$dev_name" <<'EOF'
+import json
+import re
+import sys
+
+script, name = sys.argv[1], sys.argv[2]
+with open(script, encoding="utf-8") as f:
+    text = f.read()
+
+pattern = re.compile(
+    r"""^(REMOTE_NAME\s*=\s*)(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')""",
+    re.MULTILINE,
+)
+new_text, count = pattern.subn(
+    lambda m: m.group(1) + json.dumps(name, ensure_ascii=False), text, count=1
+)
+if count == 0:
+    sys.exit(1)
+
+with open(script, "w", encoding="utf-8") as f:
+    f.write(new_text)
+EOF
+    then
+        echo "✅ REMOTE_NAME set to \"$dev_name\" in $REMOTE_SCRIPT"
+        echo "   Restart the remote service to apply it."
+    else
+        echo "⚠️  Could not update $REMOTE_SCRIPT (no 'REMOTE_NAME = \"...\"' line, or no write permission)."
+        echo "    Set this line manually in remote.py:"
+        echo "    REMOTE_NAME = \"$dev_name\""
+        return 1
+    fi
 }
 
 # Function to mount USB drive
