@@ -198,6 +198,58 @@ set_sound_card() {
     echo "✅ Reglages ALSA sauvegardes !"
 }
 
+# Function to install Bluetooth Remote Script & LED Display module with venv
+install_bluetooth_remote() {
+    echo "🎮 Installing Remote Control & LED module in venv..."
+
+    sudo usermod -aG dialout,gpio,input,spi,i2c "$USER"
+
+    if [ ! -d "/opt/venv" ]; then
+        sudo mkdir -p /opt/venv
+        sudo python3 -m venv --system-site-packages /opt/venv
+    fi
+    sudo /opt/venv/bin/pip install --upgrade pip
+
+    sudo /opt/venv/bin/pip install evdev==1.6.1 lgpio==0.2.2.0 pyserial==3.5
+    sudo /opt/venv/bin/pip install "git+https://github.com/HEnquist/pycamilladsp.git@15d9b7c434b8e795bcad25783b75d5354acdb840"
+
+    echo "📥 Downloading remote.py and tm1637_lgpio.py from GitHub..."
+    wget -q https://raw.githubusercontent.com/melomane63/Remote-and-Display-Camilladsp/main/remote.py -O ~/remote.py
+    
+    PYVER=$(/opt/venv/bin/python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+    wget -q https://raw.githubusercontent.com/melomane63/tm1637_lgpio/main/tm1637_lgpio.py -O /tmp/tm1637_lgpio.py
+    sudo cp /tmp/tm1637_lgpio.py "/opt/venv/lib/python${PYVER}/site-packages/tm1637_lgpio.py"
+    rm -f /tmp/tm1637_lgpio.py
+
+    sudo tee /etc/systemd/system/remote.service > /dev/null <<EOL
+[Unit]
+Description=CamillaDSP Remote control, led display & power trigger
+After=default.target
+
+[Service]
+User=$USER
+Type=simple
+WorkingDirectory=~
+ExecStart=/opt/venv/bin/python3 remote.py
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+KillSignal=SIGTERM
+TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=remote
+
+[Install]
+WantedBy=default.target
+EOL
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable remote.service
+    sudo systemctl start remote.service
+    echo "✅ Remote service configured and started with /opt/venv/bin/python3 !"
+}
+
 # Function to pair Bluetooth Remote using bluetuith, select device, and write to remote.py
 pair_bluetooth_remote() {
     REMOTE_SCRIPT="${REMOTE_SCRIPT:-$HOME/remote.py}"
@@ -329,58 +381,6 @@ EOF
     fi
 }
 
-# Function to install Bluetooth Remote Script & LED Display module with venv
-install_bluetooth_remote() {
-    echo "🎮 Installing Remote Control & LED module in venv..."
-
-    sudo usermod -aG dialout,gpio,input,spi,i2c "$USER"
-
-    if [ ! -d "/opt/venv" ]; then
-        sudo mkdir -p /opt/venv
-        sudo python3 -m venv --system-site-packages /opt/venv
-    fi
-    sudo /opt/venv/bin/pip install --upgrade pip
-
-    sudo /opt/venv/bin/pip install evdev==1.6.1 lgpio==0.2.2.0 pyserial==3.5
-    sudo /opt/venv/bin/pip install "git+https://github.com/HEnquist/pycamilladsp.git@15d9b7c434b8e795bcad25783b75d5354acdb840"
-
-    echo "📥 Downloading remote.py and tm1637_lgpio.py from GitHub..."
-    wget -q https://raw.githubusercontent.com/melomane63/Remote-and-Display-Camilladsp/main/remote.py -O ~/remote.py
-    
-    PYVER=$(/opt/venv/bin/python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-    wget -q https://raw.githubusercontent.com/melomane63/tm1637_lgpio/main/tm1637_lgpio.py -O /tmp/tm1637_lgpio.py
-    sudo cp /tmp/tm1637_lgpio.py "/opt/venv/lib/python${PYVER}/site-packages/tm1637_lgpio.py"
-    rm -f /tmp/tm1637_lgpio.py
-
-    sudo tee /etc/systemd/system/remote.service > /dev/null <<EOL
-[Unit]
-Description=CamillaDSP Remote control, led display & power trigger
-After=default.target
-
-[Service]
-User=$USER
-Type=simple
-WorkingDirectory=~
-ExecStart=/opt/venv/bin/python3 remote.py
-Restart=on-failure
-RestartSec=5
-KillMode=control-group
-KillSignal=SIGTERM
-TimeoutStopSec=10
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=remote
-
-[Install]
-WantedBy=default.target
-EOL
-
-    sudo systemctl daemon-reload
-    sudo systemctl enable remote.service
-    sudo systemctl start remote.service
-    echo "✅ Remote service configured and started with /opt/venv/bin/python3 !"
-}
-
 # Function to reboot
 reboot_now() {
     read -p "Reboot now? (y/n): " choice
@@ -397,8 +397,8 @@ install_everything() {
     install_lyrion_and_squeezelite
     mount_usb_drive
     set_sound_card
-    pair_bluetooth_remote
     install_bluetooth_remote
+    pair_bluetooth_remote
     reboot_now
     echo "✅ All installations completed!"
 }
@@ -415,8 +415,8 @@ while true; do
     echo "5) Install Lyrion Media Server & Squeezelite"
     echo "6) Mount USB Drive"
     echo "7) Configure Sound Levels (alsamixer)"
-    echo "8) Pair Bluetooth Remote"
-    echo "9) Install Bluetooth Remote Script"
+    echo "8) Install Remote Script"
+    echo "9) Pair Bluetooth Remote"
     echo "10) Reboot System"
     echo "11) Exit"
     echo "=================================="
@@ -430,8 +430,8 @@ while true; do
         5) install_lyrion_and_squeezelite ;;
         6) mount_usb_drive ;;
         7) set_sound_card ;;
-        8) pair_bluetooth_remote ;;
-        9) install_bluetooth_remote ;;
+        8) install_bluetooth_remote ;;
+        9) pair_bluetooth_remote ;;
         10) reboot_now ;;
         11) echo "Exiting..."; exit 0 ;;
         *) echo "Invalid option. Please try again." ;;
