@@ -151,12 +151,9 @@ install_lyrion_and_squeezelite() {
     echo "🔊 Installing Squeezelite..."
     sudo apt install -y squeezelite
 
-    # Safely update Squeezelite output device
-    if grep -q "^SL_OPTIONS=" /etc/default/squeezelite; then
-        sudo sed -i 's/^SL_OPTIONS=.*/SL_OPTIONS="-o hw:Loopback,0,0"/' /etc/default/squeezelite
-    else
-        echo 'SL_OPTIONS="-o hw:Loopback,0,0"' | sudo tee -a /etc/default/squeezelite
-    fi
+   # Safely update Squeezelite output device
+    sudo sed -i '/^SL_OPTIONS=/d;/^SL_SOUNDCARD=/d;/^SB_EXTRA_ARGS=/d' /etc/default/squeezelite
+    echo -e 'SL_SOUNDCARD="hw:Loopback,1"\nSB_EXTRA_ARGS="-W -C 5 -r 48000-48000 -R hLE:::28"' | sudo tee -a /etc/default/squeezelite > /dev/null
 
     sudo systemctl restart squeezelite
 }
