@@ -253,7 +253,7 @@ EOF
     done
 
     IFS=$'\t' read -r dev_path dev_name dev_keys <<< "${lines[$((choice - 1))]}"
-    echo "➡️️  Selected: $dev_name ($dev_keys keys)"
+    echo "➡  Selected: $dev_name ($dev_keys keys)"
     if (( ${dev_keys%%/*} < 10 )); then
         echo "⚠️  This device supports few of the remote keys: check that it is really the remote."
     fi
