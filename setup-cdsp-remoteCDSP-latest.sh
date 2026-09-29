@@ -414,7 +414,9 @@ with open(script, "w", encoding="utf-8") as f:
 EOF
     then
         echo "✅ REMOTE_NAME set to \"$dev_name\" in $REMOTE_SCRIPT"
-        echo "   Restart the remote service to apply it."
+        echo "🔄 Restarting remote service..."
+        sudo systemctl restart remote
+        echo "✅ Remote service restarted successfully."
     else
         echo "⚠️  Could not update $REMOTE_SCRIPT (no 'REMOTE_NAME = \"...\"' line, or no write permission)."
         echo "    Set this line manually in remote.py:"
