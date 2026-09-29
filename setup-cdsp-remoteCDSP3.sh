@@ -161,11 +161,146 @@ install_lyrion_and_squeezelite() {
     sudo systemctl restart squeezelite
 }
 
+# Function to pair Bluetooth Remote using bluetuith, select device, and write to remote.py
+pair_bluetooth_remote() {
+    # Path of remote.py (edit if the installer copies it elsewhere) and Python of the venv
+    REMOTE_SCRIPT="${REMOTE_SCRIPT:-$HOME/remote.py}"
+    VENV_PYTHON="${VENV_PYTHON:-/opt/venv/bin/python3}"
+
+    echo "🔗 Preparing Bluetooth Remote pairing interface..."
+    
+    # S'assurer que le Bluetooth n'est pas bloqué et relancer le service
+    sudo rfkill unblock bluetooth
+    sudo systemctl restart bluetooth
+    sleep 2
+
+    # Allumer le Bluetooth
+    bluetoothctl power on
+
+    # Vérifier si bluetuith est installé, sinon l'installer
+    if ! command -v bluetuith &> /dev/null; then
+        echo "📦 Installing bluetuith for visual Bluetooth management..."
+        sudo apt update
+        sudo apt install -y golang-go git
+        go install github.com/darkhz/bluetuith@latest
+        sudo ln -sf ~/go/bin/bluetuith /usr/bin/bluetuith
+    fi
+
+    echo ""
+    echo "💡 Instructions :"
+    echo "   1. L'interface bluetuith va s'ouvrir."
+    echo "   2. Mettez votre télécommande en mode appairage (LED clignotante)."
+    echo "   3. Utilisez les flèches pour trouver votre télécommande, appuyez sur Entrée pour la Pairer, puis la Connecter."
+    echo "   4. Appuyez sur 'q' pour quitter l'interface une fois terminé."
+    echo ""
+    read -p "Appuyez sur Entrée pour lancer bluetuith..."
+
+    # Lancer l'interface visuelle
+    bluetuith
+    
+    echo "✅ Bluetooth setup interface closed."
+
+    # --- Integration of select_remote_device logic below ---
+    echo ""
+    echo "🔍 Detecting input devices..."
+    echo "   The remote should now be connected. Press a key on it if needed."
+    read -rp "Press Enter to scan..."
+
+    # One line per device: path <TAB> name <TAB> supported keys (best match first)
+    local -a lines
+    mapfile -t lines < <("$VENV_PYTHON" - <<'EOF'
+import evdev
+from evdev import ecodes as e
+
+names = ['KEY_VOLUMEDOWN', 'KEY_VOLUMEUP', 'KEY_MUTE', 'KEY_PLAYPAUSE', 'KEY_PREVIOUSSONG',
+         'KEY_NEXTSONG', 'KEY_UP', 'KEY_DOWN', 'KEY_LEFT', 'KEY_RIGHT', 'KEY_POWER',
+         'KEY_ENTER', 'KEY_BACK', 'KEY_HOMEPAGE']
+codes = {e.ecodes[n] for n in names}
+
+rows = []
+for p in evdev.list_devices():
+    d = evdev.InputDevice(p)
+    keys = d.capabilities().get(e.EV_KEY, [])
+    rows.append((len(codes & set(keys)), p, d.name))
+
+for score, p, name in sorted(rows, key=lambda r: (-r[0], r[1])):
+    print(f"{p}\t{name}\t{score}/{len(codes)}")
+EOF
+)
+
+    if [ "${#lines[@]}" -eq 0 ]; then
+        echo "❌ No input device found (is the remote connected? is evdev installed in the venv?)"
+        return 1
+    fi
+
+    echo ""
+    echo "Input devices found (best match for the remote first):"
+    local i dev_path dev_name dev_keys
+    for i in "${!lines[@]}"; do
+        IFS=$'\t' read -r dev_path dev_name dev_keys <<< "${lines[$i]}"
+        printf "   %d) %-26s %-8s %s\n" "$((i + 1))" "$dev_name" "$dev_keys" "$dev_path"
+    done
+    echo ""
+
+    local choice
+    while true; do
+        read -rp "Choose your remote [1-${#lines[@]}] (Enter = 1): " choice
+        choice="${choice:-1}"
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#lines[@]} )); then
+            break
+        fi
+        echo "Invalid choice."
+    done
+
+    IFS=$'\t' read -r dev_path dev_name dev_keys <<< "${lines[$((choice - 1))]}"
+    echo "➡️️  Selected: $dev_name ($dev_keys keys)"
+    if (( ${dev_keys%%/*} < 10 )); then
+        echo "⚠️  This device supports few of the remote keys: check that it is really the remote."
+    fi
+
+    if [ ! -f "$REMOTE_SCRIPT" ]; then
+        echo "⚠️  $REMOTE_SCRIPT not found. Set this line manually in remote.py:"
+        echo "   REMOTE_NAME = \"$dev_name\""
+        return 1
+    fi
+
+    # Replace only the value of REMOTE_NAME; the rest of the line (comment) is kept
+    if "$VENV_PYTHON" - "$REMOTE_SCRIPT" "$dev_name" <<'EOF'
+import json
+import re
+import sys
+
+script, name = sys.argv[1], sys.argv[2]
+with open(script, encoding="utf-8") as f:
+    text = f.read()
+
+pattern = re.compile(
+    r"""^(REMOTE_NAME\s*=\s*)(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')""",
+    re.MULTILINE,
+)
+new_text, count = pattern.subn(
+    lambda m: m.group(1) + json.dumps(name, ensure_ascii=False), text, count=1
+)
+if count == 0:
+    sys.exit(1)
+
+with open(script, "w", encoding="utf-8") as f:
+    f.write(new_text)
+EOF
+    then
+        echo "✅ REMOTE_NAME set to \"$dev_name\" in $REMOTE_SCRIPT"
+        echo "🔄 Restarting remote service..."
+        sudo systemctl restart remote
+        echo "✅ Remote service restarted successfully."
+    else
+        echo "⚠️  Could not update $REMOTE_SCRIPT (no 'REMOTE_NAME = \"...\"' line, or no write permission)."
+        echo "    Set this line manually in remote.py:"
+        echo "    REMOTE_NAME = \"$dev_name\""
+        return 1
+    fi
+}
+
 # Function to install Bluetooth Remote Script & LED Display module with venv
-# Reconstruit d'apres l'audit reel du disque (pip freeze, chemins, service) : le venv doit
-# heriter des paquets systeme (python-apt, distro, ssh-import-id ne s'installent pas via
-# pip seul), pyserial + pycamilladsp (via Git) sont necessaires a remote.py et etaient
-# absents de l'ancienne version de cette fonction.
 install_bluetooth_remote() {
     echo "🎮 Installing Remote Control & LED module in venv..."
 
@@ -184,21 +319,12 @@ install_bluetooth_remote() {
     # Dependances STRICTEMENT necessaires a remote.py (portables, testees Bookworm + Trixie)
     sudo /opt/venv/bin/pip install evdev==1.6.1 lgpio==0.2.2.0 pyserial==3.5
 
-    # Paquets herites du systeme (gpiozero, numpy, scipy, python-apt, distro, ssh-import-id...)
-    # via --system-site-packages : on ne les pin PAS ici, leurs versions dependent de la
-    # distro (Bookworm vs Trixie) et python-apt/distro/ssh-import-id ne sont pas de vrais
-    # paquets PyPI portables (lies a libapt-pkg du systeme) - forcer leur version echoue
-    # souvent a la compilation sur une distro differente de celle ou la version a ete figee.
-
     # pycamilladsp (client Python du demon CamillaDSP) - installe via Git, commit precis
-    # trouve dans l'audit. C'est le paquet manquant de l'ancienne version de cette fonction.
     sudo /opt/venv/bin/pip install "git+https://github.com/HEnquist/pycamilladsp.git@15d9b7c434b8e795bcad25783b75d5354acdb840"
 
     echo "📥 Downloading remote.py and tm1637_lgpio.py from GitHub..."
     wget -q https://raw.githubusercontent.com/melomane63/Remote-and-Display-Camilladsp/main/remote.py -O ~/remote.py
-    # tm1637_lgpio.py place directement dans le venv - chemin calcule dynamiquement
-    # (python3.11 sur Bookworm, python3.13 sur Trixie, etc.)
-    # /opt/venv appartient a root -> telechargement dans /tmp puis copie avec sudo
+    
     PYVER=$(/opt/venv/bin/python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
     wget -q https://raw.githubusercontent.com/melomane63/tm1637_lgpio/main/tm1637_lgpio.py -O /tmp/tm1637_lgpio.py
     sudo cp /tmp/tm1637_lgpio.py "/opt/venv/lib/python${PYVER}/site-packages/tm1637_lgpio.py"
@@ -232,43 +358,6 @@ EOL
     sudo systemctl enable remote.service
     sudo systemctl start remote.service
     echo "✅ Remote service configured and started with /opt/venv/bin/python3 !"
-}
-
-
-# Function to pair Bluetooth Remote using bluetuith
-pair_bluetooth_remote() {
-    echo "🔗 Preparing Bluetooth Remote pairing interface..."
-    
-    # S'assurer que le Bluetooth n'est pas bloqué et relancer le service
-    sudo rfkill unblock bluetooth
-    sudo systemctl restart bluetooth
-    sleep 2
-
-    # Allumer le Bluetooth
-    bluetoothctl power on
-
-    # Vérifier si bluetuith est installé, sinon l'installer
-    if ! command -v bluetuith &> /dev/null; then
-        echo "📦 Installing bluetuith for visual Bluetooth management..."
-        sudo apt update
-        sudo apt install -y golang-go git
-        go install github.com/darkhz/bluetuith@latest
-        sudo ln -sf ~/go/bin/bluetuith /usr/bin/bluetuith
-    fi
-
-    echo ""
-    echo "💡 Instructions :"
-    echo "   1. L'interface bluetuith va s'ouvrir."
-    echo "   2. Mettez votre télécommande en mode appairage (LED clignotante)."
-    echo "   3. Utilisez les flèches pour trouver votre télécommande, appuyez sur Entrée pour la Pairer, puis la Connecter."
-    echo "   4. Appuyez sur 'q' pour quitter l'interface une fois terminé."
-    echo ""
-    read -p "Appuyez sur Entrée pour lancer bluetuith..."
-
-    # Lancer l'interface visuelle
-    bluetuith
-    
-    echo "✅ Bluetooth setup interface closed."
 }
 
 # Function to mount USB drive
@@ -325,9 +414,9 @@ install_everything() {
     configure_boot_config
     install_camilladsp
     install_lyrion_and_squeezelite
+    pair_bluetooth_remote
     install_bluetooth_remote
     mount_usb_drive
-    pair_bluetooth_remote
     set_sound_card
     reboot_now
     echo "✅ All installations completed!"
@@ -343,8 +432,8 @@ while true; do
     echo "3) Configure /boot/firmware/config.txt"
     echo "4) Install CamillaDSP & GUI"
     echo "5) Install Lyrion Media Server & Squeezelite"
-    echo "6) Install Bluetooth Remote Script"
-    echo "7) Pair Bluetooth Remote"
+    echo "6) Pair Bluetooth Remote"
+    echo "7) Install Bluetooth Remote Script"
     echo "8) Mount USB Drive"
     echo "9) Configure Sound Levels (alsamixer)"
     echo "10) Reboot System"
@@ -358,8 +447,8 @@ while true; do
         3) configure_boot_config ;;
         4) install_camilladsp ;;
         5) install_lyrion_and_squeezelite ;;
-        6) install_bluetooth_remote ;;
-        7) pair_bluetooth_remote ;;
+        6) pair_bluetooth_remote ;;
+        7) install_bluetooth_remote ;;
         8) mount_usb_drive ;;
         9) set_sound_card ;;
         10) reboot_now ;;
