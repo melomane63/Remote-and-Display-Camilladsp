@@ -408,7 +408,7 @@ while true; do
     echo "=================================="
     echo "  Raspberry Pi Audio Setup Menu   "
     echo "=================================="
-    echo "1) Install Everything (Automated)"
+    echo "1) Install Everything"
     echo "2) Upgrade System"
     echo "3) Configure /boot/firmware/config.txt"
     echo "4) Install CamillaDSP & GUI"
