@@ -320,6 +320,7 @@ pair_bluetooth_remote() {
     bluetuith
     
     echo "✅ Bluetooth setup interface closed."
+    /opt/venv/bin/python3 -m evdev.evtest
 }
 
 # Function to mount USB drive
