@@ -571,7 +571,8 @@ def send_lms_command(command):
         with open(f"/sys/class/net/{default_iface}/address") as f:
             mac = f.read().strip().replace(":", "%3A").lower()
 
-        with socket.create_connection((socket.gethostname(), 9090)) as sock:
+        #with socket.create_connection((socket.gethostname(), 9090)) as sock:
+        with socket.create_connection((socket.gethostname(), 9090), timeout=5) as sock:
             sock.sendall(f"{mac} {command}\r\nexit\r\n".encode("utf-8"))
             return sock.recv(4096).decode("utf-8").strip()
 
