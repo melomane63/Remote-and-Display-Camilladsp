@@ -98,6 +98,8 @@ bass_gain_prev = treble_gain_prev = tilt_gain_prev = presence_gain_prev = 0
 loudness_gain_prev = DEFAULT_LOUDNESS_REF
 current_config_key = None       # Settings key of the active config file
 
+adc_buffer = b""                # Incomplete serial data waiting for its newline
+
 display_refresh_event = asyncio.Event()
 
 
@@ -166,7 +168,8 @@ ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
 try:
     adc_value_init = int(ser.readline().decode().strip())
 except ValueError:
-    adc_value_init = 0
+    adc_value_init = 1500   # fallback if the sensor is absent
+ser.timeout = 0   # non-blocking reads from here on
 
 last_level = next(
     (i for i, t in enumerate(ADC_LEVELS) if adc_value_init < t),
@@ -571,7 +574,6 @@ def send_lms_command(command):
         with open(f"/sys/class/net/{default_iface}/address") as f:
             mac = f.read().strip().replace(":", "%3A").lower()
 
-        #with socket.create_connection((socket.gethostname(), 9090)) as sock:
         with socket.create_connection((socket.gethostname(), 9090), timeout=5) as sock:
             sock.sendall(f"{mac} {command}\r\nexit\r\n".encode("utf-8"))
             return sock.recv(4096).decode("utf-8").strip()
@@ -674,20 +676,31 @@ def toggle_power():
 # ====================== BACKGROUND TASKS ======================
 
 async def adc_reader_loop():
+    """Read the ambient light sensor without ever blocking the event loop.
+    Only the most recent complete line received since the last pass is used."""
+    global adc_buffer
     last_brightness = -1
 
     while True:
-        line = ser.readline().decode('utf-8', errors='ignore').strip()
-        if line:
-            try:
-                adc_value = int(line)
-                brightness = adc_to_brightness(adc_value)
-                if brightness != last_brightness:
-                    tm.brightness(brightness)
-                    last_brightness = brightness
-                    log.info("ADC = %s -> Brightness = %s", adc_value, brightness)
-            except ValueError:
-                log.warning("Non-numeric input received: %s", line)
+        if ser.in_waiting:
+            adc_buffer += ser.read(ser.in_waiting)
+            # Everything before the last \n is complete; the rest waits for more data
+            *lines, adc_buffer = adc_buffer.split(b"\n")
+            line = next(
+                (l.decode('utf-8', errors='ignore').strip()
+                 for l in reversed(lines) if l.strip()),
+                None,
+            )
+            if line:
+                try:
+                    adc_value = int(line)
+                    brightness = adc_to_brightness(adc_value)
+                    if brightness != last_brightness:
+                        tm.brightness(brightness)
+                        last_brightness = brightness
+                        log.info("ADC = %s -> Brightness = %s", adc_value, brightness)
+                except ValueError:
+                    log.warning("Non-numeric input received: %s", line)
 
         await asyncio.sleep(0.1)
 
