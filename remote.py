@@ -7,7 +7,6 @@ import signal
 import socket
 import sys
 import time
-
 import evdev
 import lgpio
 import serial
