@@ -41,7 +41,7 @@ KEY_BINDINGS = {
     'LEFT': 'KEY_LEFT',                 # Tilt gain - / bass -
     'RIGHT': 'KEY_RIGHT',               # Tilt gain + / bass +
     'POWER': 'KEY_POWER',               # Long press: toggle auto power; very long press: shutdown
-    'ENTER': 'KEY_ENTER',               # Short: tone/tilt/loudness on-off; long: switch tone/tilt screen
+    'ENTER': 'KEY_ENTER',               # Short: bass/treble/tilt/presence all 0 or restored (loudness screen: loudness on-off); long: switch tone/tilt screen
     'BACK': 'KEY_BACK',                 # Next DSP configuration (files prefixed with "_")
     'HOMEPAGE': 'KEY_HOMEPAGE',         # Next DSP configuration (files prefixed with "|")
 }
@@ -236,6 +236,13 @@ def get_filter_param(config, filt, param):
     f = (config.get("filters") or {}).get(filt)
     params = f.get("parameters") if isinstance(f, dict) else None
     return params.get(param) if isinstance(params, dict) else None
+
+
+def get_filter_params(config, filt):
+    """Return the 'parameters' dict of a filter, or None if the filter is missing."""
+    f = (config.get("filters") or {}).get(filt)
+    params = f.get("parameters") if isinstance(f, dict) else None
+    return params if isinstance(params, dict) else None
 
 
 def get_bass_treble(config, mode="gain"):
@@ -525,41 +532,59 @@ def handle_arrow_keys(key):
 
 
 def handle_enter_press(screen):
-    """Short ENTER press: switch the tone/tilt/loudness of the given screen off, or restore it."""
+    """Short ENTER press.
+    - tone / tilt screen: bass, treble, tilt and presence are ALL set to 0,
+      or ALL restored to their previous values if they are already all at 0.
+    - loudness screen: loudness is switched off (-99) or restored."""
     global bass_gain_prev, treble_gain_prev, tilt_gain_prev, loudness_gain_prev, presence_gain_prev
 
-    bass_params, treble_params, tilt_params, loudness_params = get_bass_treble(config_active, mode="parameters")
-    presence_params, _ = get_presence_tilt(config_active, mode="parameters")
+    if screen in ("tone", "tilt"):
+        bass = get_filter_params(config_active, "Bass")
+        treble = get_filter_params(config_active, "Treble")
+        tilt = get_filter_params(config_active, "Tilt")
+        presence = get_filter_params(config_active, "Presence")
 
-    if screen == "tone" and bass_params is not None and treble_params is not None:
-        if bass_params['gain'] == treble_params['gain'] == 0:
-            bass_params['gain'], treble_params['gain'] = bass_gain_prev, treble_gain_prev
-            bass_gain_prev, treble_gain_prev = 0, 0
-        else:
-            bass_gain_prev, treble_gain_prev = bass_params['gain'], treble_params['gain']
-            bass_params['gain'] = treble_params['gain'] = 0
-        cdsp.config.set_active(config_active)
-        display_tone_info()
+        existing = [p for p in (bass, treble, tilt, presence) if p is not None]
+        if not existing:
+            return
 
-    elif screen == "tilt" and presence_params is not None and tilt_params is not None:
-        if presence_params['gain'] == tilt_params['gain'] == 0:
-            presence_params['gain'], tilt_params['gain'] = presence_gain_prev, tilt_gain_prev
-            presence_gain_prev, tilt_gain_prev = 0, 0
+        if all(p.get('gain', 0) == 0 for p in existing):
+            # Everything is at 0: restore the previous values
+            if bass:
+                bass['gain'] = bass_gain_prev
+            if treble:
+                treble['gain'] = treble_gain_prev
+            if tilt:
+                tilt['gain'] = tilt_gain_prev
+            if presence:
+                presence['gain'] = presence_gain_prev
+            bass_gain_prev = treble_gain_prev = tilt_gain_prev = presence_gain_prev = 0
         else:
-            presence_gain_prev, tilt_gain_prev = presence_params['gain'], tilt_params['gain']
-            presence_params['gain'] = tilt_params['gain'] = 0
-        cdsp.config.set_active(config_active)
-        display_tilt_info()
+            # Remember the current values, then set everything to 0
+            bass_gain_prev = bass.get('gain', 0) if bass else 0
+            treble_gain_prev = treble.get('gain', 0) if treble else 0
+            tilt_gain_prev = tilt.get('gain', 0) if tilt else 0
+            presence_gain_prev = presence.get('gain', 0) if presence else 0
+            for p in existing:
+                p['gain'] = 0
 
-    elif screen == "loudness" and loudness_params is not None:
-        if loudness_params['reference_level'] == -99:
-            loudness_params['reference_level'] = loudness_gain_prev
-            loudness_gain_prev = -99
-        else:
-            loudness_gain_prev = loudness_params['reference_level']
-            loudness_params['reference_level'] = -99
         cdsp.config.set_active(config_active)
-        display_loudness_info()
+        if screen == "tone":
+            display_tone_info()
+        else:
+            display_tilt_info()
+
+    elif screen == "loudness":
+        loudness_params = get_filter_params(config_active, "Loudness")
+        if loudness_params is not None:
+            if loudness_params.get('reference_level') == -99:
+                loudness_params['reference_level'] = loudness_gain_prev
+                loudness_gain_prev = -99
+            else:
+                loudness_gain_prev = loudness_params.get('reference_level', DEFAULT_LOUDNESS_REF)
+                loudness_params['reference_level'] = -99
+            cdsp.config.set_active(config_active)
+            display_loudness_info()
 
 
 def send_lms_command(command):
