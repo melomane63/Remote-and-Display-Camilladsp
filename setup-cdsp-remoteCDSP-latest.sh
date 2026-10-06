@@ -260,13 +260,14 @@ pair_bluetooth_remote() {
 
     bluetoothctl power on
 
-    if ! command -v bluetuith &> /dev/null; then
-        echo "📦 Installing bluetuith for visual Bluetooth management..."
-        sudo apt update
-        sudo apt install -y golang-go git
-        go install github.com/darkhz/bluetuith@latest
-        sudo ln -sf ~/go/bin/bluetuith /usr/bin/bluetuith
-    fi
+if ! command -v bluetuith &> /dev/null; then
+    echo "📦 Installation de bluetuith..."
+    wget https://github.com/bluetuith-org/bluetuith/releases/download/v0.2.7/bluetuith_0.2.7_Linux_arm64.tar.gz -O ~/bluetuith.tar.gz
+    tar -xzf ~/bluetuith.tar.gz -C ~/ bluetuith
+    sudo mv ~/bluetuith /usr/bin/bluetuith
+    sudo chmod +x /usr/bin/bluetuith
+    rm -f ~/bluetuith.tar.gz
+fi
 
     echo ""
     echo "💡 Instructions :"
