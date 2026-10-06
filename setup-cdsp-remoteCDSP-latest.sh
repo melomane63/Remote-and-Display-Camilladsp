@@ -21,7 +21,7 @@ configure_boot_config() {
     # Backup before modifying
     sudo cp "$CONFIG_FILE" "${CONFIG_FILE}.bak"
 
-    # 1. Nettoyer les doublons potentiels ou anciennes lignes de configuration
+    # 1. Clean up potential duplicates or old configuration lines
     sudo sed -i '/dtparam=audio=/d' "$CONFIG_FILE"
     sudo sed -i '/dtoverlay=gpio-poweroff/d' "$CONFIG_FILE"
     sudo sed -i '/dtoverlay=gpio-shutdown/d' "$CONFIG_FILE"
@@ -31,22 +31,22 @@ configure_boot_config() {
     sudo sed -i 's/^display_auto_detect=/#display_auto_detect=/' "$CONFIG_FILE"
     sudo sed -i 's/^dtoverlay=vc4-kms-v3d/#dtoverlay=vc4-kms-v3d/' "$CONFIG_FILE"
 
-    # 2. S'assurer qu'il y a bien une section [all] propre à la fin, et y injecter les paramètres une seule fois
+    # 2. Ensure there is a clean [all] section at the end, and inject parameters only once
     if ! sudo grep -q "\[all\]" "$CONFIG_FILE"; then
         echo -e "\n[all]" | sudo tee -a "$CONFIG_FILE" > /dev/null
     fi
 
-    # Ajout propre des paramètres requis sous [all]
+    # Clean addition of required parameters under [all]
     sudo sed -i '/\[all\]/a dtparam=audio=off\ndtoverlay=gpio-poweroff,gpiopin=21,active_low=1\ndtoverlay=gpio-shutdown,gpio_pin=20,active_low=0,gpio_pull=down\nenable_uart=1\ngpio=12=ip,pu' "$CONFIG_FILE"
 
-    # 3. Nettoyage de la console série dans cmdline.txt
+    # 3. Clean serial console in cmdline.txt
     CMDLINE_FILE="/boot/firmware/cmdline.txt"
     if [ -f "$CMDLINE_FILE" ]; then
         sudo cp "$CMDLINE_FILE" "${CMDLINE_FILE}.bak"
         sudo sed -i 's/console=serial0,[0-9]* //' "$CMDLINE_FILE"
     fi
 
-    echo "✅ /boot/firmware/config.txt et /boot/firmware/cmdline.txt nettoyés et mis à jour proprement !"
+    echo "✅ /boot/firmware/config.txt and /boot/firmware/cmdline.txt successfully cleaned and updated!"
 }
 
 # Function to install CamillaDSP & CamillaGUI
@@ -166,10 +166,10 @@ mount_usb_drive() {
     USB_UUID=$(sudo blkid -s UUID -o value /dev/sda1 2>/dev/null || true)
     
     if [ -z "$USB_UUID" ]; then
-        echo "⚠️ Aucune clé USB détectée automatiquement sur /dev/sda1."
-        read -p "Entrez manuellement l'UUID de votre clé USB : " USB_UUID
+        echo "⚠️ No USB drive automatically detected on /dev/sda1."
+        read -p "Enter your USB drive UUID manually: " USB_UUID
     else
-        echo "✅ Clé USB détectée automatiquement avec l'UUID : $USB_UUID"
+        echo "✅ USB drive automatically detected with UUID: $USB_UUID"
     fi
     
     if [ -n "$USB_UUID" ]; then
@@ -181,18 +181,18 @@ mount_usb_drive() {
         sudo mount -a
         echo "✅ USB Drive mounted at /mnt/usb with UUID $USB_UUID!"
     else
-        echo "❌ Erreur : Aucun UUID valide n'a pu être configuré."
+        echo "❌ Error: No valid UUID could be configured."
     fi
 }
 
 # Function to set sound card output
 set_sound_card() {
-    echo "🔊 Lancement d'alsamixer pour configurer la carte son..."
-    echo "   (Echap ou 'q' pour quitter une fois les reglages faits)"
+    echo "🔊 Launching alsamixer to configure the sound card..."
+    echo "   (Press Esc or 'q' to exit once settings are done)"
     alsamixer
-    echo "💾 Sauvegarde des reglages ALSA..."
+    echo "💾 Saving ALSA settings..."
     sudo alsactl store
-    echo "✅ Reglages ALSA sauvegardes !"
+    echo "✅ ALSA settings saved!"
 }
 
 # Function to install Bluetooth Remote Script & LED Display module with venv
@@ -260,23 +260,23 @@ pair_bluetooth_remote() {
 
     bluetoothctl power on
 
-if ! command -v bluetuith &> /dev/null; then
-    echo "📦 Installation de bluetuith..."
-    wget https://github.com/bluetuith-org/bluetuith/releases/download/v0.2.7/bluetuith_0.2.7_Linux_arm64.tar.gz -O ~/bluetuith.tar.gz
-    tar -xzf ~/bluetuith.tar.gz -C ~/ bluetuith
-    sudo mv ~/bluetuith /usr/bin/bluetuith
-    sudo chmod +x /usr/bin/bluetuith
-    rm -f ~/bluetuith.tar.gz
-fi
+    if ! command -v bluetuith &> /dev/null; then
+        echo "📦 Installing bluetuith..."
+        wget https://github.com/bluetuith-org/bluetuith/releases/download/v0.2.7/bluetuith_0.2.7_Linux_arm64.tar.gz -O ~/bluetuith.tar.gz
+        tar -xzf ~/bluetuith.tar.gz -C ~/ bluetuith
+        sudo mv ~/bluetuith /usr/bin/bluetuith
+        sudo chmod +x /usr/bin/bluetuith
+        rm -f ~/bluetuith.tar.gz
+    fi
 
     echo ""
-    echo "💡 Instructions :"
-    echo "   1. L'interface bluetuith va s'ouvrir."
-    echo "   2. Mettez votre télécommande en mode appairage (LED clignotante)."
-    echo "   3. Utilisez les flèches pour trouver votre télécommande, appuyez sur Entrée pour la Pairer, puis la Connecter."
-    echo "   4. Appuyez sur 'q' pour quitter l'interface une fois terminé."
+    echo "💡 Instructions:"
+    echo "   1. The bluetuith interface will open."
+    echo "   2. Put your remote control into pairing mode (flashing LED)."
+    echo "   3. Use the arrow keys to find your remote, press Enter to Pair, then Connect."
+    echo "   4. Press 'q' to exit the interface when done."
     echo ""
-    read -p "Appuyez sur Entrée pour lancer bluetuith..."
+    read -p "Press Enter to launch bluetuith..."
 
     bluetuith
     
