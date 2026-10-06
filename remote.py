@@ -206,7 +206,8 @@ config_active = cdsp.config.active()
 
 # GPIO
 h = lgpio.gpiochip_open(0)
-lgpio.gpio_claim_output(h, POWER_GPIO)
+lgpio.gpio_claim_output(h, POWER_GPIO, 0)   # Initial level LOW: no LOW -> HIGH glitch on the relay
+time.sleep(1)                   # Keep the relay off so the A70 can re-arm
 lgpio.gpio_write(h, POWER_GPIO, 1)
 lgpio.gpio_claim_input(h, TV_GPIO, lgpio.SET_PULL_UP)
 
