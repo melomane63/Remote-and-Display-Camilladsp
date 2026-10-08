@@ -126,7 +126,7 @@ devices:
   capture:
     type: Alsa
     channels: 2
-    device: "plughw:Loopback,0,0"
+    device: "plughw:Loopback,1,0"
     format: S32LE
   playback:
     type: Alsa
@@ -153,7 +153,7 @@ install_lyrion_and_squeezelite() {
 
    # Safely update Squeezelite output device
     sudo sed -i '/^SL_OPTIONS=/d;/^SL_SOUNDCARD=/d;/^SB_EXTRA_ARGS=/d' /etc/default/squeezelite
-    echo -e 'SL_SOUNDCARD="hw:Loopback,1"\nSB_EXTRA_ARGS="-W -C 5 -r 48000-48000 -R hLE"' | sudo tee -a /etc/default/squeezelite > /dev/null
+    echo -e 'SL_SOUNDCARD="hw:Loopback,0"\nSB_EXTRA_ARGS="-W -C 5 -r 48000-48000 -R hLE"' | sudo tee -a /etc/default/squeezelite > /dev/null
 
     sudo systemctl restart squeezelite
 }
