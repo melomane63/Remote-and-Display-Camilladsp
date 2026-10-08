@@ -131,8 +131,8 @@ devices:
   playback:
     type: Alsa
     channels: 2
-    device: "plughw:0,0"
-    format: S32LE
+    device: "default"
+    format: S16LE
 EOL
 
     # Load ALSA loopback module
