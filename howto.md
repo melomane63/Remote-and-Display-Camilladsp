@@ -345,12 +345,3 @@ The volume and mute settings of the LMS GUI and CamillaDSP should now stay align
 
 **The LMS slider does not move CamillaDSP.**
 Check that the player's volume control is set to *adjustable* in LMS (Step 2). With *Fixed* or *Disabled*, LMS sends no `prefset` notifications, and the sync script stays idle.
-
-**CamillaDSP slider does not move the LMS slider.**
-Set `DEBUG = True` in the script and restart it. If you see `<< … prefset server volume …` lines but no `LMS … % -> Camilla … dB` lines, the detected MAC does not match the one LMS uses. Check the MAC that LMS reports with `players 0 50` on the CLI, and set `PLAYER_MANUAL` accordingly.
-
-**The service restarts in a loop.**
-Check the journal: `journalctl -u cdsp-lms-volume-sync -n 50`. Common causes: CamillaDSP websocket not enabled (Step 3), LMS CLI not reachable, or `/etc/hosts` not populated with `lyrionserver.local`.
-
-**Squeezelite applies its own volume attenuation (double attenuation).**
-Make sure `/etc/default/squeezelite` has `-O hw:Dummy -V Master` in `SB_EXTRA_ARGS`, and that the Dummy card is loaded. Without these, squeezelite attenuates the PCM signal before it reaches CamillaDSP.
