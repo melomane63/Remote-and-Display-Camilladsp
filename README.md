@@ -3,4 +3,4 @@ bash <(curl -sSL https://raw.githubusercontent.com/melomane63/Remote-and-Display
 CDSP latest: 
 bash <(curl -sSL https://raw.githubusercontent.com/melomane63/Remote-and-Display-Camilladsp/main/setup-cdsp-remoteCDSP-latest.sh) 
 Camilladsp_LMS volume  bridge 
-bash <(curl -sSL https://raw.githubusercontent.com/melomane63/Remote-and-Display-Camilladsp/main/setup_camilla_lms_volume.sh) 
+bash <(curl -sSL https://raw.githubusercontent.com/melomane63/Remote-and-Display-Camilladsp/main/install_camilla_lms_volume.sh) 
