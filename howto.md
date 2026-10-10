@@ -181,23 +181,13 @@ echo snd-dummy | sudo tee /etc/modules-load.d/snd-dummy.conf
 echo 'options snd-dummy fake_buffer=0 pcm_substreams=1' | sudo tee /etc/modprobe.d/snd_dummy.conf
 ```
 
-`fake_buffer=0` keeps the card control-only (no fake PCM). `pcm_substreams=1` is required—do **not** use `pcm_substreams=0` (can hang on reboot).
+`fake_buffer=0` keeps the card control-only (no fake PCM). `pcm_substreams=1` is required—do
 
 Then reboot to activate the Dummy card:
 
 ```bash
 sudo reboot
 ```
-
-After reboot, confirm:
-
-```bash
-aplay -l                    # expect the new Dummy card
-amixer -c Dummy scontrols   # expect Master
-```
-
-> Note: **Card indices may shift** when Dummy loads. Keep **`hw:Loopback,...`** and **`hw:DAC8PRO,...`** (names) in CamillaDSP YAML. Re-check audio after reboot before Step 2.
-
 Edit `/etc/default/squeezelite`:
 
 ```bash
@@ -210,12 +200,7 @@ If there is no **`SB_EXTRA_ARGS`**, add:
 SB_EXTRA_ARGS="-O hw:Dummy -V Master"
 ```
 
-Otherwise add the flags to the existing line (e.g. `SB_EXTRA_ARGS="-e alac -O hw:Dummy -V Master"`). If `-O` or `-V` are already present, set them to `hw:Dummy` and `Master`.
-
-| Flag | Purpose |
-|------|---------|
-| `-O hw:Dummy` | Volume card (not PCM): squeezelite sends LMS volume commands to the Dummy card, not to the audio signal |
-| `-V Master` | LMS volume drives Dummy **Master** |
+Otherwise add the flags to the existing line (e.g. `SB_EXTRA_ARGS="-e alac -O hw:Dummy -V Master"`)
 
 With these flags, the PCM signal that squeezelite sends to the Loopback stays at **full scale**, and squeezelite's own attenuation is neutralized. The sync script does **not** read the Dummy card: it relies on LMS's `prefset` notifications instead.
 
