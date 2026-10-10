@@ -2,16 +2,20 @@
 Lyrion Music Server (LMS) <-> CamillaDSP volume bridge.
 LMS -> Camilla : events pushed by the CLI (listen 1).
 Camilla -> LMS : polling.
+
+The player is identified by the MAC address of the default network
+interface (read at startup), URL-encoded as %3A for the LMS CLI.
 """
 
 import logging
+import os
 import re
 import select
 import signal
 import socket
 import sys
 import time
-from urllib.parse import quote, unquote
+from urllib.parse import unquote
 
 from camilladsp import CamillaClient
 
@@ -21,7 +25,6 @@ DEBUG = False
 # --- Configuration ---
 LMS_ADDR = ("lyrionserver.local", 9090)  # echo "192.168.1.81 lyrionserver.local" | sudo tee -a /etc/hosts
 CAMILLA_ADDR = ("127.0.0.1", 1234)
-PLAYER = "dc:a6:32:3c:1c:21"
 
 # --- Logging ---
 _logger = logging.getLogger("camilla_lms")
@@ -78,16 +81,41 @@ pct_to_db = lambda p: _interp(p, CURVE_POINTS)
 db_to_pct = lambda d: round(_interp(d, _INV))
 
 
-# --- Timing / LMS regex ---
+# --- Timing ---
 POLL_S = 0.25
 RESTORE_TIMEOUT_S = 0.5   # after an unmute: wait this long before pushing Camilla's volume
 ECHO_TIMEOUT_S = 0.5      # max wait for LMS to echo a volume we pushed
 CONFIRM_READS = 2         # Camilla volume must be read this many times in a row
 
-PQ = quote(PLAYER, safe="")
-_P = re.escape(PLAYER)
-RE_VOL = re.compile(rf"{_P} prefset server volume (-?\d+(?:\.\d+)?)$", re.I)
-RE_MUTE = re.compile(rf"{_P} prefset server mute ([01])$", re.I)
+
+# --- Player detection (runtime) ---
+PLAYER = None   # e.g. "dc%3Aa6%3A32%3A3c%3A1c%3A21", set by init_player()
+PQ = None       # already URL-encoded
+_P = None       # regex-escaped PLAYER
+RE_VOL = None
+RE_MUTE = None
+
+
+def detect_player_mac():
+    """Return the MAC of the default network interface, URL-encoded (%3A)."""
+    with os.popen("ip route show default") as route_info:
+        default_iface = next(
+            (line.split()[4] for line in route_info if "default" in line), None
+        )
+    if not default_iface:
+        raise RuntimeError("No default network interface found")
+    with open(f"/sys/class/net/{default_iface}/address") as f:
+        return f.read().strip().replace(":", "%3A").lower()
+
+
+def init_player():
+    """Detect the player MAC and build the LMS regexes from it."""
+    global PLAYER, PQ, _P, RE_VOL, RE_MUTE
+    PLAYER = detect_player_mac()           # e.g. "dc%3Aa6%3A32%3A3c%3A1c%3A21"
+    PQ = PLAYER                            # already URL-encoded, do NOT re-quote
+    _P = re.escape(PLAYER)
+    RE_VOL = re.compile(rf"{_P} prefset server volume (-?\d+(?:\.\d+)?)$", re.I)
+    RE_MUTE = re.compile(rf"{_P} prefset server mute ([01])$", re.I)
 
 
 def connect_camilla():
@@ -243,6 +271,8 @@ for _sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
 def main():
     setup_logging()
     validate_curve(CURVE_POINTS)
+    init_player()
+    log(f"Player MAC: {PLAYER}")
     log("Curve validated")
 
     while True:
