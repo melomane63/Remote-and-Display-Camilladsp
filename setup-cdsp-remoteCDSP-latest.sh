@@ -211,7 +211,8 @@ install_bluetooth_remote() {
     sudo /opt/venv/bin/pip install "git+https://github.com/HEnquist/pycamilladsp.git@15d9b7c434b8e795bcad25783b75d5354acdb840"
 
     echo "📥 Downloading remote.py and tm1637_lgpio.py from GitHub..."
-    wget -q https://raw.githubusercontent.com/melomane63/Remote-and-Display-Camilladsp/main/remote.py -O ~/remote.py
+    mkdir -p "$HOME/scripts"
+    wget -q https://raw.githubusercontent.com/melomane63/Remote-and-Display-Camilladsp/main/remote.py -O "$HOME/scripts/remote.py"
     
     PYVER=$(/opt/venv/bin/python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
     wget -q https://raw.githubusercontent.com/melomane63/tm1637_lgpio/main/tm1637_lgpio.py -O /tmp/tm1637_lgpio.py
@@ -226,8 +227,8 @@ After=default.target
 [Service]
 User=$USER
 Type=simple
-WorkingDirectory=~
-ExecStart=/opt/venv/bin/python3 remote.py
+WorkingDirectory=$HOME/scripts
+ExecStart=/opt/venv/bin/python3 $HOME/scripts/remote.py
 Restart=on-failure
 RestartSec=5
 KillMode=control-group
@@ -249,7 +250,7 @@ EOL
 
 # Function to pair Bluetooth Remote using bluetuith, select device, and write to remote.py
 pair_bluetooth_remote() {
-    REMOTE_SCRIPT="${REMOTE_SCRIPT:-$HOME/remote.py}"
+    REMOTE_SCRIPT="${REMOTE_SCRIPT:-$HOME/scripts/remote.py}"
     VENV_PYTHON="${VENV_PYTHON:-/opt/venv/bin/python3}"
 
     echo "🔗 Preparing Bluetooth Remote pairing interface..."
