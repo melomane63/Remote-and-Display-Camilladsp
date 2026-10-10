@@ -60,7 +60,7 @@ HYSTERESIS_RATIO = 0.03  # 3 % hysteresis between two brightness levels
 HOLD_TOGGLE_POWER = 2
 HOLD_STOP = 10
 HOLD_SWITCH_TONE_TILT = 15
-HOLD_SHUTDOWN = 400
+HOLD_SHUTDOWN = 300
 
 SCREEN_RETURN_DELAY = 30    # Seconds without key press before returning to the volume screen
 
@@ -769,8 +769,37 @@ async def display_manager_loop():
         except asyncio.TimeoutError:
             pass
 
-
 async def auto_poweroff():
+    """Switch the power relay off after POWER_OFF_DELAY minutes of silence, back on
+    when sound returns, and halt the Raspberry Pi after HALT_DELAY hours of silence."""
+    global is_waiting_for_sound
+    silence_counter = 0
+
+    while True:
+        await asyncio.sleep(1)
+
+        if is_silent():
+            silence_counter += 1
+            if silence_counter == POWER_OFF_DELAY * 60 and not is_waiting_for_sound:
+                lgpio.gpio_write(h, POWER_GPIO, lgpio.LOW)
+                show("PW OFF")
+                is_waiting_for_sound = True  # Wait for sound or POWER key to switch back on
+
+            if silence_counter >= HALT_DELAY * 3600:
+                shutdown_system()
+                break
+
+        else:
+            silence_counter = 0
+            if auto_power_enabled and lgpio.gpio_read(h, POWER_GPIO) == 0:
+                if is_waiting_for_sound:
+                    lgpio.gpio_write(h, POWER_GPIO, lgpio.HIGH)
+                    display_volume_info()
+                    is_waiting_for_sound = False
+            elif not auto_power_enabled and lgpio.gpio_read(h, POWER_GPIO) == 1:
+                lgpio.gpio_write(h, POWER_GPIO, lgpio.LOW)
+
+async def auto_poweroffOLD():
     """Switch the power relay off after POWER_OFF_DELAY minutes of silence, back on
     when sound returns, and halt the Raspberry Pi after HALT_DELAY hours of silence."""
     global is_waiting_for_sound
