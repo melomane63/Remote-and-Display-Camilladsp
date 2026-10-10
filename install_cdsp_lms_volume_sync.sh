@@ -11,7 +11,13 @@
 #   sudo bash install_cdsp_lms_volume_sync.sh [--old-service NAME] [--lms-ip IP] [--venv DIR]
 #
 # Safe to run again: it updates the script and the service in place.
-
+# If we are running from a pipe (<(...)) and not root, force a re-download.
+if [[ $EUID -ne 0 && ! -r "$0" || "$0" == /dev/fd/* ]]; then
+    SELF_URL="https://raw.githubusercontent.com/melomane63/Remote-and-Display-Camilladsp/main/install_cdsp_lms_volume_sync.sh"
+    TMP_SCRIPT="$(mktemp /tmp/install_cdsp_lms.XXXXXX)"
+    curl -fsSL "$SELF_URL" -o "$TMP_SCRIPT"
+    exec sudo bash "$TMP_SCRIPT" "$@"
+fi
 set -euo pipefail
 
 # ---------------------------------------------------------------- settings
