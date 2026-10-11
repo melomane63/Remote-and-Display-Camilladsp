@@ -210,9 +210,15 @@ Restart squeezelite:
 sudo systemctl restart squeezelite
 ```
 
-## Step 2: Enable LMS volume control for this player
+## Step 2: Keep volume changes flowing despite Fixed 100% output
 
-In the LMS web UI, go to **Settings → Player → Extra settings → Audio → Volume control** and set it to **adjustable**. The sync script relies on LMS pushing `prefset server volume` and `prefset server mute` notifications over its CLI; with a fixed or disabled volume control, LMS sends none, and the sync script has nothing to react to.
+In the LMS web UI, go to Settings → Player → [your player] → Extra Settings → Audio → Volume Control and set it to "Output level is fixed at 100%".
+
+Then, in Material Skin's server-side settings, enable the option to show and allow volume control for fixed-volume players.
+
+Why this works: LMS 9.0.2+ exposes a use_volume_control player attribute. When this is set to "1", client applications like Material Skin process volume commands normally, even though the player's audio output is fixed at 100%. Material Skin 5.8.3+ supports this attribute natively, so the slider remains active and sends prefset server volume notifications to LMS. Your sync script listens for these notifications and relays them to CamillaDSP. The audio path stays bit-perfect because LMS applies no digital attenuation.
+
+Note: Do not set volume control to "adjustable". That would re-enable LMS's own digital attenuation on the player and defeat the purpose of the fixed 100% output. The whole point of the use_volume_control mechanism is to keep the UI responsive while the audio path remains untouched.
 
 ## Step 3: Confirm CamillaDSP websocket port
 
