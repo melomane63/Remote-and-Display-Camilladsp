@@ -730,6 +730,30 @@ async def adc_reader_loop():
         await asyncio.sleep(0.1)
 
 
+async def volume_watcher_loop():
+    """Refresh the display when the main volume or mute state changes
+    outside of the commands sent by this script (web UI, LMS, ...)."""
+    last_volume = cdsp.volume.main_volume()
+    last_mute = cdsp.volume.main_mute()
+
+    while True:
+        await asyncio.sleep(0.5)
+        try:
+            current_volume = cdsp.volume.main_volume()
+            current_mute = cdsp.volume.main_mute()
+        except Exception as e:
+            log.warning("Volume watcher: CamillaDSP unreachable (%s)", e)
+            continue
+
+        if current_volume != last_volume or current_mute != last_mute:
+            last_volume = current_volume
+            last_mute = current_mute
+            # Redraw only if the volume screen is shown and no volume key is held
+            # (the key handler already updates the display in that case)
+            if last_displayed == "volume" and not is_volume_key_held:
+                display_volume_info(current_volume, current_mute)
+
+
 async def display_manager_loop():
     global screen_idle_ticks, is_key_held, is_volume_key_held
     idle_display_counter = 0
@@ -798,40 +822,6 @@ async def auto_poweroff():
                     is_waiting_for_sound = False
             elif not auto_power_enabled and lgpio.gpio_read(h, POWER_GPIO) == 1:
                 lgpio.gpio_write(h, POWER_GPIO, lgpio.LOW)
-
-async def auto_poweroffOLD():
-    """Switch the power relay off after POWER_OFF_DELAY minutes of silence, back on
-    when sound returns, and halt the Raspberry Pi after HALT_DELAY hours of silence."""
-    global is_waiting_for_sound
-    silence_counter = 0
-    last_power_relay_state = lgpio.gpio_read(h, POWER_GPIO)
-
-    while True:
-        await asyncio.sleep(1)
-
-        if is_silent():
-            silence_counter += 1
-            if silence_counter == POWER_OFF_DELAY * 60 and not is_waiting_for_sound:
-                lgpio.gpio_write(h, POWER_GPIO, lgpio.LOW)
-                show("PW OFF")
-                last_power_relay_state = lgpio.gpio_read(h, POWER_GPIO)
-                is_waiting_for_sound = True  # Wait for sound or POWER key to switch back on
-
-            if silence_counter >= HALT_DELAY * 3600:
-                shutdown_system()
-                break
-
-        else:
-            silence_counter = 0
-            if auto_power_enabled and last_power_relay_state == 0:
-                if is_waiting_for_sound:
-                    lgpio.gpio_write(h, POWER_GPIO, lgpio.HIGH)
-                    display_volume_info()
-                    last_power_relay_state = lgpio.gpio_read(h, POWER_GPIO)
-                    is_waiting_for_sound = False
-            elif not auto_power_enabled and last_power_relay_state == 1:
-                lgpio.gpio_write(h, POWER_GPIO, lgpio.LOW)
-                last_power_relay_state = lgpio.gpio_read(h, POWER_GPIO)
 
 
 async def monitor_tv_gpio():
@@ -1003,6 +993,7 @@ async def main():
         asyncio.create_task(auto_poweroff()),
         asyncio.create_task(display_manager_loop()),
         asyncio.create_task(adc_reader_loop()),
+        asyncio.create_task(volume_watcher_loop()),
         asyncio.create_task(monitor_tv_gpio()),
         asyncio.create_task(remote_events(remote)),
     ]
