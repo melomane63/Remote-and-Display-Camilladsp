@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.cdsp-lms-volume-sync</string>
+
+    <!-- __HOME__ is replaced by your home directory during installation (see README_macos.md) -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/cdsp-lms-sync/venv/bin/python3</string>
+        <string>__HOME__/cdsp-lms-sync/cdsp_lms_volume_sync.py</string>
+    </array>
+
+    <!-- Start at login, restart if it ever exits (5 s minimum between restarts) -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/cdsp-lms-volume-sync.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/cdsp-lms-volume-sync.log</string>
+</dict>
+</plist>
