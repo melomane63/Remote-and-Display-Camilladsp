@@ -1,5 +1,3 @@
-
-markdown
 # Synchronize Lyrion Music Server (LMS) volume slider with CamillaDSP volume
 
 This howto adds **LMS volume sync** on top of a working Linux **squeezelite → ALSA Loopback → CamillaDSP → DAC** endpoint.
