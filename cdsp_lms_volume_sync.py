@@ -38,9 +38,7 @@ PLAYER_MANUAL = ""
 def detect_player_mac():
     """MAC of the default network interface, raw format (dc:a6:32:3c:1c:21)."""
     with os.popen("ip route show default") as route_info:
-        default_iface = next(
-            (line.split()[4] for line in route_info if "default" in line), None
-        )
+        default_iface = next((line.split()[4] for line in route_info), None)
     if not default_iface:
         raise RuntimeError("No default network interface found")
     with open(f"/sys/class/net/{default_iface}/address") as f:
@@ -49,24 +47,10 @@ def detect_player_mac():
 
 PLAYER = PLAYER_MANUAL or detect_player_mac()
 
-# --- Logging ---
-_logger = logging.getLogger("camilla_lms")
-
-
-def setup_logging():
-    """Log to stdout (goes to journalctl under systemd)."""
-    _logger.setLevel(logging.DEBUG if DEBUG else logging.INFO)
-    ch = logging.StreamHandler(sys.stdout)
-    ch.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s",
-                                      datefmt="%Y-%m-%d %H:%M:%S"))
-    _logger.addHandler(ch)
-
-
-def log(msg):
-    _logger.info(msg)
-
+log = logging.getLogger("camilla_lms").info
 
 # --- Curve ---
+# Strictly increasing in both % and dB, spanning 0..100 %.
 CURVE_POINTS = [
     (0, -99.0), (5, -80.0), (10, -65.0), (15, -50.0), (20, -44.1),
     (25, -36.9), (30, -34.5), (35, -31.8), (40, -30.0), (45, -27.3),
@@ -75,28 +59,14 @@ CURVE_POINTS = [
 ]
 
 
-def validate_curve(pts):
-    """Ensure the curve is strictly increasing in both % and dB (inverse must exist)."""
-    if len(pts) < 2:
-        raise ValueError("CURVE_POINTS must have at least 2 points")
-    if pts[0][0] != 0 or pts[-1][0] != 100:
-        raise ValueError(f"CURVE_POINTS must span 0..100 %, got {pts[0][0]}..{pts[-1][0]}")
-    for (p0, d0), (p1, d1) in zip(pts, pts[1:]):
-        if p1 <= p0:
-            raise ValueError(f"Curve not strictly increasing in %: {p0} -> {p1}")
-        if d1 <= d0:
-            raise ValueError(f"Curve not strictly increasing in dB: {d0} -> {d1}")
-
-
 # --- Interpolation ---
 def _interp(x, pts):
     if x <= pts[0][0]:
         return pts[0][1]
-    if x >= pts[-1][0]:
-        return pts[-1][1]
     for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
-        if x0 <= x <= x1:
+        if x <= x1:
             return y0 + (x - x0) / (x1 - x0) * (y1 - y0)
+    return pts[-1][1]
 
 
 _INV = [(d, p) for p, d in CURVE_POINTS]
@@ -106,9 +76,7 @@ db_to_pct = lambda d: round(_interp(d, _INV))
 
 # --- Timing / LMS regex ---
 POLL_S = 0.25
-RESTORE_TIMEOUT_S = 0.5   # after an unmute: wait this long before pushing Camilla's volume
-ECHO_TIMEOUT_S = 0.5      # max wait for LMS to echo a volume we pushed
-CONFIRM_READS = 2         # Camilla volume must be read this many times in a row
+RESTORE_TIMEOUT_S = 0.5   # after an unmute: LMS may report a wrong volume for this long
 
 PQ = quote(PLAYER, safe="")
 _P = re.escape(PLAYER)
@@ -116,80 +84,47 @@ RE_VOL = re.compile(rf"{_P} prefset server volume (-?\d+(?:\.\d+)?)$", re.I)
 RE_MUTE = re.compile(rf"{_P} prefset server mute ([01])$", re.I)
 
 
-def connect_camilla():
-    while True:
-        try:
-            c = CamillaClient(*CAMILLA_ADDR)
-            c.connect()
-            log("Connected to CamillaDSP")
-            return c
-        except Exception as e:
-            log(f"CamillaDSP not ready ({e}), retrying...")
-            time.sleep(2)
-
-
 def run():
-    cdsp = connect_camilla()
+    cdsp = CamillaClient(*CAMILLA_ADDR)
+    cdsp.connect()
+    log("Connected to CamillaDSP")
     sock = None
     try:
-        vol = cdsp.volume
         sock = socket.create_connection(LMS_ADDR, timeout=5)
         sock.settimeout(None)
         log("Connected to LMS CLI")
         send = lambda cmd: sock.sendall((cmd + "\n").encode())
 
         # --- Bridge state ---
-        st = {"awaiting_restore": False, "expected_echo": None, "state_deadline": 0.0}
-
+        vol = cdsp.volume
         pct = db_to_pct(vol.main_volume())
         muted = bool(vol.main_mute())
-        cand, cand_n = None, 0
+        restore_until = 0.0   # monotonic deadline of the post-unmute window (0 = none)
+        prev = None           # previous Camilla reading (debounce)
 
-        def to_idle():
-            st["awaiting_restore"] = False
-            st["expected_echo"] = None
-
-        def arm_restore():
+        def set_mute(new, origin, apply):
             # After an unmute LMS may report a wrong volume (+/- keys restart from 0/5 %),
-            # or nothing at all (icon click). Either way, push nothing to LMS until the
-            # deadline, and correct any wrong volume it reports meanwhile.
-            st["awaiting_restore"] = True
-            st["expected_echo"] = None
-            st["state_deadline"] = time.monotonic() + RESTORE_TIMEOUT_S
-
-        def push_volume(p):
-            st["awaiting_restore"] = False
-            st["expected_echo"] = p
-            st["state_deadline"] = time.monotonic() + ECHO_TIMEOUT_S
-            send(f"{PQ} mixer volume {p}")
+            # or nothing at all (icon click). During the restore window, correct any wrong
+            # volume it reports and push nothing from Camilla.
+            nonlocal muted, restore_until
+            muted = new
+            log(f"{origin} mute={new}")
+            apply(new)
+            restore_until = 0.0 if new else time.monotonic() + RESTORE_TIMEOUT_S
 
         def on_lms_volume(p):
-            nonlocal pct
-            # 1. Waiting for LMS to report its restored volume after unmute.
-            if st["awaiting_restore"]:
+            nonlocal pct, restore_until
+            if time.monotonic() < restore_until:
                 if p != pct:
                     log(f"LMS unmute: restore LMS to {pct}%")
-                    push_volume(pct)
+                    send(f"{PQ} mixer volume {pct}")
                 else:
-                    to_idle()
+                    restore_until = 0.0
                 return
-            # 2. Echo of our own push.
-            if st["expected_echo"] is not None and p == st["expected_echo"]:
-                to_idle()
-                return
-            # 3. Real user action.
-            to_idle()
-            if p != pct:
+            if p != pct:   # real user action (an echo of our own push has p == pct)
                 pct = p
                 log(f"LMS {p}% -> Camilla {pct_to_db(p):.1f} dB")
                 vol.set_main_volume(pct_to_db(p))
-
-        def tick(now):
-            if (st["awaiting_restore"] or st["expected_echo"] is not None) \
-                    and now >= st["state_deadline"]:
-                if st["expected_echo"] is not None:
-                    log("State timeout, resuming")
-                to_idle()
 
         # --- Startup: Camilla wins ---
         send("listen 1")
@@ -211,42 +146,28 @@ def run():
                     if DEBUG and "prefset server" in line:
                         log(f"<< {line}")
                     if (m := RE_MUTE.match(line)):
-                        lms_muted = m[1] == "1"
-                        if lms_muted != muted:
-                            muted = lms_muted
-                            log(f"LMS mute={muted} -> Camilla")
-                            vol.set_main_mute(muted)
-                            (to_idle if muted else arm_restore)()
+                        if (lms_muted := m[1] == "1") != muted:
+                            set_mute(lms_muted, "LMS -> Camilla", vol.set_main_mute)
                         continue
                     if (m := RE_VOL.match(line)) and not muted:
                         on_lms_volume(round(abs(float(m[1]))))
 
-            now = time.monotonic()
-            tick(now)
-
             # --- Camilla -> LMS ---
-            cam_muted = bool(vol.main_mute())
-            if cam_muted != muted:
-                muted = cam_muted
-                log(f"Camilla mute={muted} -> LMS")
-                send(f"{PQ} mixer muting {int(muted)}")
-                (to_idle if muted else arm_restore)()
+            if (cam_muted := bool(vol.main_mute())) != muted:
+                set_mute(cam_muted, "Camilla -> LMS",
+                         lambda m: send(f"{PQ} mixer muting {int(m)}"))
 
-            if muted or st["awaiting_restore"] or st["expected_echo"] is not None:
-                cand, cand_n = None, 0
+            if muted or time.monotonic() < restore_until:
+                prev = None
                 continue
 
             p = db_to_pct(vol.main_volume())
-            if p == pct:
-                cand, cand_n = None, 0
-            elif p != cand:
-                cand, cand_n = p, 1
+            if p != pct and p == prev:   # confirmed by two consecutive reads
+                pct, prev = p, None
+                log(f"Camilla {p}% -> LMS")
+                send(f"{PQ} mixer volume {p}")
             else:
-                cand_n += 1
-                if cand_n >= CONFIRM_READS:
-                    pct, cand, cand_n = p, None, 0
-                    log(f"Camilla {p}% -> LMS")
-                    push_volume(p)
+                prev = p
     finally:
         if sock is not None:
             sock.close()
@@ -256,20 +177,13 @@ def run():
             pass
 
 
-# --- Signal handling ---
-def cleanup(signum, frame):
-    log(f"Stopping bridge (signal {signum})")
-    sys.exit(0)   # the finally block in run() closes the connections
-
-
-for _sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
-    signal.signal(_sig, cleanup)
-
-
 def main():
-    setup_logging()
-    validate_curve(CURVE_POINTS)
-    log("Curve validated")
+    # Stdout goes to journalctl under systemd, which already timestamps each line.
+    logging.basicConfig(stream=sys.stdout,
+                        level=logging.DEBUG if DEBUG else logging.INFO,
+                        format="%(message)s")
+    # SIGINT already raises KeyboardInterrupt; both end up in run()'s finally block.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
     while True:
         try:
