@@ -68,6 +68,7 @@ CamillaDSP-volume CamillaDSP-volume
 
 text
 
+
 ### Components
 
 | Piece | Role |
@@ -93,6 +94,7 @@ An installer script automates all the steps below. On the Camilla host, run:
 
 ```bash
 bash <(curl -sSL "https://raw.githubusercontent.com/melomane63/Remote-and-Display-Camilladsp/main/install_cdsp_lms_volume_sync.sh?t=$(date +%s)")
+
 The installer will:
 
 Install missing packages (git, curl, python3-venv).
