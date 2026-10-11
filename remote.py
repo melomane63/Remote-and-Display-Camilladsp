@@ -160,6 +160,18 @@ def adc_to_brightness(adc_value):
     return BRIGHTNESS_LEVELS[last_level]
 
 
+def get_config_display_label():
+    """Return the 3-character label shown on the display for the active config.
+    Prefer the config `title` field; fall back to the config file name.
+    Config file prefixes ("_" and "|") are stripped in both cases."""
+    title = cdsp.config.title()
+    if title:
+        label = title.strip().replace("_", "").replace("|", "")
+    else:
+        label = "---"
+    return label[:3].ljust(3)
+
+
 # ====================== INITIALISATION ======================
 
 # Ambient light sensor: initial brightness level
@@ -202,7 +214,8 @@ if remote is None:
 # CamillaDSP
 cdsp = CamillaClient("127.0.0.1", 1234)
 cdsp.connect()
-config_active = cdsp.config.active()
+# Protection 1: never let config_active be None at startup
+config_active = cdsp.config.active() or {}
 
 # GPIO
 h = lgpio.gpiochip_open(0)
@@ -261,7 +274,7 @@ def get_bass_treble(config, mode="gain"):
             return bass, treble, tilt, loudness
         raise ValueError("Invalid mode: use 'gain' or 'parameters'")
 
-    except (KeyError, TypeError):
+    except (KeyError, TypeError, AttributeError):
         return (0, 0, 0, 0) if mode == "gain" else (None, None, None, None)
 
 
@@ -278,7 +291,7 @@ def get_presence_tilt(config, mode="gain"):
             return presence, tilt
         raise ValueError("Invalid mode: use 'gain' or 'parameters'")
 
-    except (KeyError, TypeError):
+    except (KeyError, TypeError, AttributeError):
         return (0, 0) if mode == "gain" else (None, None)
 
 
@@ -398,9 +411,7 @@ def display_volume_info(current_volume=None, is_muted=None):
     if is_muted is None:
         is_muted = cdsp.volume.main_mute()
 
-    config_path = (cdsp.config.file_path() or "").replace(CONFIG_DIR, '')
-    config_path = config_path.split('.')[0].replace("_", "").replace("|", "")
-    config_path = config_path[:3].ljust(3)
+    config_path = get_config_display_label()
 
     display_vol = max(-99, round(current_volume))
     blanks = '  -' if display_vol == 0 else (' --', '---')[min(len(str(abs(display_vol))), 2) - 1]
@@ -449,7 +460,7 @@ def display_tilt_info():
 
 def change_volume_from_key(key, current_volume, volume_step=1):
     volume_change = -volume_step if key == KEY_BINDINGS['VOLUMEDOWN'] else volume_step
-    new_volume = clamp(current_volume + volume_change, -99, 0)
+    new_volume = clamp(round(current_volume) + volume_change, -99, 0)
 
     if new_volume != current_volume:
         cdsp.volume.set_main_volume(new_volume)
@@ -637,7 +648,12 @@ async def change_config(cdsp, config_pattern, cycle=True):
     # Remember the tone of the config we are leaving (and write it to disk)
     save_audio_settings(config_active)
 
+    # Protection 3: abort if the new config does not parse to a dict
     new_config_data = cdsp.config.read_and_parse_file(new_config_path)
+    if not isinstance(new_config_data, dict):
+        log.error("Config %s is invalid, aborting switch", new_config_path)
+        return
+
     filters = new_config_data.get('filters')
     if not isinstance(filters, dict):
         filters = {}
@@ -656,8 +672,14 @@ async def change_config(cdsp, config_pattern, cycle=True):
         if isinstance(filename, str) and filename and not os.path.isabs(filename):
             f["parameters"]["filename"] = os.path.normpath(os.path.join(config_dir, filename))
 
-    cdsp.config.set_active(new_config_data)
-    cdsp.config.set_file_path(new_config_path)
+    # Protection 4: only update the local state if CamillaDSP accepted the config
+    try:
+        cdsp.config.set_active(new_config_data)
+        cdsp.config.set_file_path(new_config_path)
+    except Exception as e:
+        log.error("Failed to apply config %s: %s", new_config_path, e)
+        return
+
     config_active = new_config_data
     current_config_key = new_key
     load_prev_values(saved)
@@ -731,25 +753,58 @@ async def adc_reader_loop():
 
 
 async def volume_watcher_loop():
-    """Refresh the display when the main volume or mute state changes
-    outside of the commands sent by this script (web UI, LMS, ...)."""
+    """Watch for external changes: main volume, mute, and active config title.
+    On a config change, resync the local state (config_active, current_config_key,
+    prev values) so that the script does not later overwrite the external config."""
+    global config_active, current_config_key
+
     last_volume = cdsp.volume.main_volume()
     last_mute = cdsp.volume.main_mute()
+    last_title = cdsp.config.title()
+    last_volume = cdsp.volume.main_volume()
 
     while True:
         await asyncio.sleep(0.5)
         try:
             current_volume = cdsp.volume.main_volume()
             current_mute = cdsp.volume.main_mute()
+            current_title = cdsp.config.title()
         except Exception as e:
             log.warning("Volume watcher: CamillaDSP unreachable (%s)", e)
             continue
 
-        if current_volume != last_volume or current_mute != last_mute:
+        # Ignore empty titles (CamillaDSP can briefly report "" during a reload)
+        title_changed = current_title != last_title
+        if current_title:
+            last_title = current_title
+
+        if title_changed:
+            # Protection 2: never let config_active become None
+            try:
+                new_active = cdsp.config.active() or {}
+            except Exception as e:
+                log.warning("Volume watcher: could not fetch active config (%s)", e)
+                new_active = None
+
+            if isinstance(new_active, dict) and new_active:
+                config_active = new_active
+                path = cdsp.config.file_path()
+                current_config_key = config_key(path) if path else None
+                saved = settings["configs"].get(current_config_key) if current_config_key else None
+                load_prev_values(saved)
+                last_warned_title = None
+                log.debug("Config title changed to '%s'", current_title)
+
+            else:
+                if current_title != last_warned_title:
+                    log.warning("Config changed but active config is unusable; keeping previous (title=%r)", current_title)
+                    last_warned_title = current_title
+
+
+        if current_volume != last_volume or current_mute != last_mute or title_changed:
             last_volume = current_volume
             last_mute = current_mute
             # Redraw only if the volume screen is shown and no volume key is held
-            # (the key handler already updates the display in that case)
             if last_displayed == "volume" and not is_volume_key_held:
                 display_volume_info(current_volume, current_mute)
 
