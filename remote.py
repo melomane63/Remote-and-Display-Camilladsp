@@ -761,7 +761,8 @@ async def volume_watcher_loop():
     last_volume = cdsp.volume.main_volume()
     last_mute = cdsp.volume.main_mute()
     last_title = cdsp.config.title()
-    last_volume = cdsp.volume.main_volume()
+    last_warned_title = None
+
 
     while True:
         await asyncio.sleep(0.5)
