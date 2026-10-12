@@ -81,6 +81,65 @@ TONE_PARAMS = {
 }
 
 
+# ====================== VOLUME CURVE ======================
+# Courbe de volume : niveau 0..100 (echelle LMS) <-> dB (CamillaDSP).
+#
+# Courbe mesuree sur le gain envoye par LMS a Squeezelite
+# (dB = 20 * log10(gain / 65536)), arrondie a 0,1 dB :
+#     1 ..  25 : ~1,47 dB / niveau  (-72,2 .. -37 dB)
+#    25 .. 100 : ~0,49 dB / niveau  (-37 .. 0 dB)
+# 0 vaut -100 dB (le vrai mute est gere a part).
+# Les points 40, 42, 45 et 48 ont ete lisses (valeurs dupliquees a la mesure)
+# pour que la courbe soit strictement croissante, ce qui rend la conversion
+# inverse exacte.
+
+CURVE_POINTS = [
+    (0, -100.0), (1, -75.0), (2, -71.2), (3, -69.5), (4, -68.0),
+    (5, -66.5), (6, -65.2), (7, -63.7), (8, -62.2), (9, -60.6),
+    (10, -59.2), (11, -57.7), (12, -56.2), (13, -54.8), (14, -53.3),
+    (15, -51.8), (16, -50.3), (17, -48.8), (18, -47.4), (19, -45.9),
+    (20, -44.4), (21, -42.9), (22, -41.4), (23, -40.0), (24, -38.5),
+    (25, -37.0), (26, -36.5), (27, -36.0), (28, -35.5), (29, -35.0),
+    (30, -34.5), (31, -34.0), (32, -33.5), (33, -33.0), (34, -32.6),
+    (35, -32.1), (36, -31.6), (37, -31.1), (38, -30.6), (39, -30.1),
+    (40, -29.6), (41, -29.1), (42, -28.6), (43, -28.2), (44, -27.3),
+    (45, -27.0), (46, -26.6), (47, -25.9), (48, -25.6), (49, -25.2),
+    (50, -24.6), (51, -24.1), (52, -23.6), (53, -23.1), (54, -22.6),
+    (55, -22.1), (56, -21.7), (57, -21.3), (58, -20.6), (59, -20.2),
+    (60, -19.9), (61, -19.2), (62, -18.6), (63, -18.3), (64, -17.8),
+    (65, -17.3), (66, -16.8), (67, -16.3), (68, -15.7), (69, -15.3),
+    (70, -14.7), (71, -14.4), (72, -13.8), (73, -13.4), (74, -12.9),
+    (75, -12.3), (76, -11.9), (77, -11.4), (78, -10.9), (79, -10.3),
+    (80, -9.9), (81, -9.4), (82, -8.9), (83, -8.4), (84, -7.9),
+    (85, -7.4), (86, -6.9), (87, -6.4), (88, -6.0), (89, -5.4),
+    (90, -4.9), (91, -4.4), (92, -3.9), (93, -3.5), (94, -3.0),
+    (95, -2.5), (96, -2.0), (97, -1.5), (98, -1.0), (99, -0.5),
+    (100, 0.0),
+]
+
+
+def _interp(x, pts):
+    if x <= pts[0][0]:
+        return pts[0][1]
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        if x <= x1:
+            return y0 + (x - x0) / (x1 - x0) * (y1 - y0)
+    return pts[-1][1]
+
+
+_INV = [(d, p) for p, d in CURVE_POINTS]
+
+
+def pct_to_db(p):
+    """Niveau 0..100 -> dB."""
+    return _interp(p, CURVE_POINTS)
+
+
+def db_to_pct(d):
+    """dB -> niveau 0..100 (entier le plus proche)."""
+    return round(_interp(d, _INV))
+
+
 # ====================== GLOBAL VARIABLES ======================
 
 key_hold_counter = 0            # Key-repeat events of the key being held (remote_events only)
@@ -404,6 +463,8 @@ init_tone()
 # ====================== DISPLAY ======================
 
 def display_volume_info(current_volume=None, is_muted=None):
+    """Show the config label and the volume on the 0..100 scale.
+    `current_volume` is the CamillaDSP main volume in dB."""
     global blank_volume_when_mute, last_displayed
 
     if current_volume is None:
@@ -413,13 +474,14 @@ def display_volume_info(current_volume=None, is_muted=None):
 
     config_path = get_config_display_label()
 
-    display_vol = max(-99, round(current_volume))
-    blanks = '  -' if display_vol == 0 else (' --', '---')[min(len(str(abs(display_vol))), 2) - 1]
+    pct = db_to_pct(current_volume)                 # 0..100 (LMS / Squeezelite curve)
+    digits = len(str(pct))
+    blanks = " " * (3 - digits) + "-" * digits      # mute: dashes replace the digits
 
     if is_muted and not is_volume_key_held:
         blank_volume_when_mute, volume_str = True, f"{config_path}{blanks}"
     else:
-        blank_volume_when_mute, volume_str = False, f"{config_path}{display_vol:3}"
+        blank_volume_when_mute, volume_str = False, f"{config_path}{pct:3}"
 
     segs = tm.encode_string(volume_str)
 
@@ -459,16 +521,20 @@ def display_tilt_info():
 # ====================== REMOTE KEY ACTIONS ======================
 
 def change_volume_from_key(key, current_volume, volume_step=1):
-    volume_change = -volume_step if key == KEY_BINDINGS['VOLUMEDOWN'] else volume_step
-    new_volume = clamp(round(current_volume) + volume_change, -99, 0)
+    """Move one step on the 0..100 scale (LMS / Squeezelite curve).
+    `current_volume` is the CamillaDSP main volume in dB."""
+    pct = db_to_pct(current_volume)
+    delta = -volume_step if key == KEY_BINDINGS['VOLUMEDOWN'] else volume_step
+    new_pct = clamp(pct + delta, 0, 100)
 
-    if new_volume != current_volume:
+    if new_pct != pct:
+        new_volume = pct_to_db(new_pct)
         cdsp.volume.set_main_volume(new_volume)
         display_volume_info(new_volume)
 
 
 def get_repeat_speed(volume, direction, exponent=2.0, pivot=-50):
-    """Delay between two volume steps while a key is held."""
+    """Delay between two volume steps while a key is held (volume in dB)."""
     min_delay = 0.01
     max_delay = 0.5
 
@@ -479,7 +545,14 @@ def get_repeat_speed(volume, direction, exponent=2.0, pivot=-50):
 
     volume = clamp(volume, -99, 0)
     t = (volume - pivot) / (0 - pivot) if volume >= pivot else 0
-    return min_delay + (t ** exponent) * (max_delay - min_delay)
+    delay = min_delay + (t ** exponent) * (max_delay - min_delay)
+
+    # The delays above were tuned for 1 dB per step. A step is now ~0.5 dB in the
+    # upper range, so scale the delay by the real dB size of the next step to keep
+    # the same speed in dB per second.
+    pct = db_to_pct(volume)
+    step_db = pct_to_db(min(pct + 1, 100)) - pct_to_db(pct)
+    return max(min_delay, delay * step_db)
 
 
 def handle_arrow_keys(key):
