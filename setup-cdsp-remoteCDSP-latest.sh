@@ -5,51 +5,123 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# =============================================================================
 # Function to update and upgrade the system
+# =============================================================================
 upgrade_system() {
     echo "🔄 Updating and upgrading system..."
     sudo apt update && sudo apt upgrade -y
     sudo apt install -y git wget curl python3-pip systemd
 }
 
-# Function to configure /boot/firmware/config.txt
-configure_boot_config() {
-    echo "⚙️ Configuring /boot/firmware/config.txt..."
-    
+# =============================================================================
+# Function to install Bluetooth Remote Script & LED Display module
+# (includes boot config for GPIO/UART/power + venv + systemd service)
+# =============================================================================
+install_bluetooth_remote() {
+    echo "🎮 Installing Remote Control & LED module (with boot configuration)..."
+
+    # -------------------------------------------------------------------------
+    # 1. Configure /boot/firmware/config.txt and cmdline.txt
+    # -------------------------------------------------------------------------
+    echo "⚙️  Configuring /boot/firmware/config.txt..."
+
     CONFIG_FILE="/boot/firmware/config.txt"
-    
+
     # Backup before modifying
     sudo cp "$CONFIG_FILE" "${CONFIG_FILE}.bak"
 
-    # 1. Clean up potential duplicates or old configuration lines
-    sudo sed -i '/dtparam=audio=/d' "$CONFIG_FILE"
-    sudo sed -i '/dtoverlay=gpio-poweroff/d' "$CONFIG_FILE"
-    sudo sed -i '/dtoverlay=gpio-shutdown/d' "$CONFIG_FILE"
-    sudo sed -i '/enable_uart=/d' "$CONFIG_FILE"
-    sudo sed -i '/gpio=12=ip,pu/d' "$CONFIG_FILE"
-    sudo sed -i 's/^camera_auto_detect=/#camera_auto_detect=/' "$CONFIG_FILE"
-    sudo sed -i 's/^display_auto_detect=/#display_auto_detect=/' "$CONFIG_FILE"
+    # Clean up potential duplicates or old configuration lines
+    sudo sed -i '/dtparam=audio=/d'            "$CONFIG_FILE"
+    sudo sed -i '/dtoverlay=gpio-poweroff/d'   "$CONFIG_FILE"
+    sudo sed -i '/dtoverlay=gpio-shutdown/d'   "$CONFIG_FILE"
+    sudo sed -i '/enable_uart=/d'              "$CONFIG_FILE"
+    sudo sed -i '/gpio=12=ip,pu/d'             "$CONFIG_FILE"
+    sudo sed -i 's/^camera_auto_detect=/#camera_auto_detect=/'     "$CONFIG_FILE"
+    sudo sed -i 's/^display_auto_detect=/#display_auto_detect=/'   "$CONFIG_FILE"
     sudo sed -i 's/^dtoverlay=vc4-kms-v3d/#dtoverlay=vc4-kms-v3d/' "$CONFIG_FILE"
 
-    # 2. Ensure there is a clean [all] section at the end, and inject parameters only once
-    if ! sudo grep -q "\[all\]" "$CONFIG_FILE"; then
+    # Ensure there is a clean [all] section
+    if ! sudo grep -q "^\[all\]" "$CONFIG_FILE"; then
         echo -e "\n[all]" | sudo tee -a "$CONFIG_FILE" > /dev/null
     fi
 
-    # Clean addition of required parameters under [all]
-    sudo sed -i '/\[all\]/a dtparam=audio=off\ndtoverlay=gpio-poweroff,gpiopin=21,active_low=1\ndtoverlay=gpio-shutdown,gpio_pin=20,active_low=0,gpio_pull=down\nenable_uart=1\ngpio=12=ip,pu' "$CONFIG_FILE"
+    # Inject parameters after the FIRST [all] section ONLY (idempotent)
+    sudo sed -i '0,/^\[all\]/a dtparam=audio=off\ndtoverlay=gpio-poweroff,gpiopin=21,active_low=1\ndtoverlay=gpio-shutdown,gpio_pin=20,active_low=0,gpio_pull=down\nenable_uart=1\ngpio=12=ip,pu' "$CONFIG_FILE"
 
-    # 3. Clean serial console in cmdline.txt
+    # Clean serial console in cmdline.txt
     CMDLINE_FILE="/boot/firmware/cmdline.txt"
     if [ -f "$CMDLINE_FILE" ]; then
         sudo cp "$CMDLINE_FILE" "${CMDLINE_FILE}.bak"
         sudo sed -i 's/console=serial0,[0-9]* //' "$CMDLINE_FILE"
     fi
 
-    echo "✅ /boot/firmware/config.txt and /boot/firmware/cmdline.txt successfully cleaned and updated!"
+    echo "✅ /boot/firmware/config.txt and /boot/firmware/cmdline.txt updated!"
+
+    # -------------------------------------------------------------------------
+    # 2. User groups & venv
+    # -------------------------------------------------------------------------
+    sudo usermod -aG dialout,gpio,input,spi,i2c "$USER"
+
+    if [ ! -d "/opt/venv" ]; then
+        sudo mkdir -p /opt/venv
+        sudo python3 -m venv --system-site-packages /opt/venv
+    fi
+    sudo /opt/venv/bin/pip install --upgrade pip
+
+    # -------------------------------------------------------------------------
+    # 3. Dependencies
+    # -------------------------------------------------------------------------
+    sudo /opt/venv/bin/pip install evdev==1.6.1 lgpio==0.2.2.0 pyserial==3.5
+    sudo /opt/venv/bin/pip install "git+https://github.com/HEnquist/pycamilladsp.git@15d9b7c434b8e795bcad25783b75d5354acdb840"
+
+    # -------------------------------------------------------------------------
+    # 4. Download scripts
+    # -------------------------------------------------------------------------
+    echo "📥 Downloading remote.py and tm1637_lgpio.py from GitHub..."
+    mkdir -p "$HOME/scripts"
+    wget -q https://raw.githubusercontent.com/melomane63/Remote-and-Display-Camilladsp/main/remote.py -O "$HOME/scripts/remote.py"
+
+    PYVER=$(/opt/venv/bin/python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+    wget -q https://raw.githubusercontent.com/melomane63/tm1637_lgpio/main/tm1637_lgpio.py -O /tmp/tm1637_lgpio.py
+    sudo cp /tmp/tm1637_lgpio.py "/opt/venv/lib/python${PYVER}/site-packages/tm1637_lgpio.py"
+    rm -f /tmp/tm1637_lgpio.py
+
+    # -------------------------------------------------------------------------
+    # 5. systemd service
+    # -------------------------------------------------------------------------
+    sudo tee /etc/systemd/system/remote.service > /dev/null <<EOL
+[Unit]
+Description=CamillaDSP Remote control, led display & power trigger
+After=default.target
+
+[Service]
+User=$USER
+Type=simple
+WorkingDirectory=$HOME/scripts
+ExecStart=/opt/venv/bin/python3 $HOME/scripts/remote.py
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+KillSignal=SIGTERM
+TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=remote
+
+[Install]
+WantedBy=default.target
+EOL
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable remote.service
+    sudo systemctl start remote.service
+    echo "✅ Remote service configured and started with /opt/venv/bin/python3 !"
 }
 
+# =============================================================================
 # Function to install CamillaDSP & CamillaGUI
+# =============================================================================
 install_camilladsp() {
     echo "🎛️ Installing CamillaDSP..."
     mkdir -p ~/camilladsp ~/camilladsp/coeffs ~/camilladsp/configs
@@ -143,7 +215,9 @@ EOL
     sudo modprobe snd-aloop
 }
 
+# =============================================================================
 # Function to install Lyrion Media Server & Squeezelite
+# =============================================================================
 install_lyrion_and_squeezelite() {
     echo "🎵 Installing Lyrion Media Server (v9.1.1)..."
     wget https://downloads.lms-community.org/LyrionMusicServer_v9.1.1/lyrionmusicserver_9.1.1_arm.deb -O ~/lyrionmusicserver_arm.deb
@@ -152,33 +226,35 @@ install_lyrion_and_squeezelite() {
     echo "🔊 Installing Squeezelite..."
     sudo apt install -y squeezelite
 
-   # Safely update Squeezelite output device
+    # Safely update Squeezelite output device
     sudo sed -i '/^SL_OPTIONS=/d;/^SL_SOUNDCARD=/d;/^SB_EXTRA_ARGS=/d' /etc/default/squeezelite
     echo -e 'SL_SOUNDCARD="hw:Loopback,0"\nSB_EXTRA_ARGS="-W -C 5 -r 48000-48000 -R hLE"' | sudo tee -a /etc/default/squeezelite > /dev/null
 
     sudo systemctl restart squeezelite
 }
 
+# =============================================================================
 # Function to mount USB drive
+# =============================================================================
 mount_usb_drive() {
     echo "💾 Setting up USB Drive auto-mount..."
     sudo mkdir -p /mnt/usb
-    
+
     USB_UUID=$(sudo blkid -s UUID -o value /dev/sda1 2>/dev/null || true)
-    
+
     if [ -z "$USB_UUID" ]; then
-        echo "⚠️ No USB drive automatically detected on /dev/sda1."
+        echo "⚠️  No USB drive automatically detected on /dev/sda1."
         read -p "Enter your USB drive UUID manually: " USB_UUID
     else
         echo "✅ USB drive automatically detected with UUID: $USB_UUID"
     fi
-    
+
     if [ -n "$USB_UUID" ]; then
         sudo sed -i 's|.* /mnt/usb .*||g' /etc/fstab
         sudo sed -i '/^$/d' /etc/fstab
 
         echo "UUID=$USB_UUID /mnt/usb auto defaults,nofail,x-systemd.device-timeout=1,noatime 0 0" | sudo tee -a /etc/fstab
-        
+
         sudo mount -a
         echo "✅ USB Drive mounted at /mnt/usb with UUID $USB_UUID!"
     else
@@ -186,7 +262,9 @@ mount_usb_drive() {
     fi
 }
 
+# =============================================================================
 # Function to set sound card output
+# =============================================================================
 set_sound_card() {
     echo "🔊 Launching alsamixer to configure the sound card..."
     echo "   (Press Esc or 'q' to exit once settings are done)"
@@ -196,66 +274,15 @@ set_sound_card() {
     echo "✅ ALSA settings saved!"
 }
 
-# Function to install Bluetooth Remote Script & LED Display module with venv
-install_bluetooth_remote() {
-    echo "🎮 Installing Remote Control & LED module in venv..."
-
-    sudo usermod -aG dialout,gpio,input,spi,i2c "$USER"
-
-    if [ ! -d "/opt/venv" ]; then
-        sudo mkdir -p /opt/venv
-        sudo python3 -m venv --system-site-packages /opt/venv
-    fi
-    sudo /opt/venv/bin/pip install --upgrade pip
-
-    sudo /opt/venv/bin/pip install evdev==1.6.1 lgpio==0.2.2.0 pyserial==3.5
-    sudo /opt/venv/bin/pip install "git+https://github.com/HEnquist/pycamilladsp.git@15d9b7c434b8e795bcad25783b75d5354acdb840"
-
-    echo "📥 Downloading remote.py and tm1637_lgpio.py from GitHub..."
-    mkdir -p "$HOME/scripts"
-    wget -q https://raw.githubusercontent.com/melomane63/Remote-and-Display-Camilladsp/main/remote.py -O "$HOME/scripts/remote.py"
-    
-    PYVER=$(/opt/venv/bin/python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-    wget -q https://raw.githubusercontent.com/melomane63/tm1637_lgpio/main/tm1637_lgpio.py -O /tmp/tm1637_lgpio.py
-    sudo cp /tmp/tm1637_lgpio.py "/opt/venv/lib/python${PYVER}/site-packages/tm1637_lgpio.py"
-    rm -f /tmp/tm1637_lgpio.py
-
-    sudo tee /etc/systemd/system/remote.service > /dev/null <<EOL
-[Unit]
-Description=CamillaDSP Remote control, led display & power trigger
-After=default.target
-
-[Service]
-User=$USER
-Type=simple
-WorkingDirectory=$HOME/scripts
-ExecStart=/opt/venv/bin/python3 $HOME/scripts/remote.py
-Restart=on-failure
-RestartSec=5
-KillMode=control-group
-KillSignal=SIGTERM
-TimeoutStopSec=10
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=remote
-
-[Install]
-WantedBy=default.target
-EOL
-
-    sudo systemctl daemon-reload
-    sudo systemctl enable remote.service
-    sudo systemctl start remote.service
-    echo "✅ Remote service configured and started with /opt/venv/bin/python3 !"
-}
-
-# Function to pair Bluetooth Remote using bluetuith, select device, and write to remote.py
+# =============================================================================
+# Function to pair Bluetooth Remote using bluetuith
+# =============================================================================
 pair_bluetooth_remote() {
     REMOTE_SCRIPT="${REMOTE_SCRIPT:-$HOME/scripts/remote.py}"
     VENV_PYTHON="${VENV_PYTHON:-/opt/venv/bin/python3}"
 
     echo "🔗 Preparing Bluetooth Remote pairing interface..."
-    
+
     sudo rfkill unblock bluetooth
     sudo systemctl restart bluetooth
     sleep 2
@@ -281,7 +308,7 @@ pair_bluetooth_remote() {
     read -p "Press Enter to launch bluetuith..."
 
     bluetuith
-    
+
     echo "✅ Bluetooth setup interface closed."
 
     echo ""
@@ -381,7 +408,9 @@ EOF
     fi
 }
 
+# =============================================================================
 # Function to reboot
+# =============================================================================
 reboot_now() {
     read -p "Reboot now? (y/n): " choice
     if [[ "$choice" == "y" || "$choice" == "Y" ]]; then
@@ -389,10 +418,11 @@ reboot_now() {
     fi
 }
 
+# =============================================================================
 # Function to install everything sequentially
+# =============================================================================
 install_everything() {
     upgrade_system
-    configure_boot_config
     install_camilladsp
     install_lyrion_and_squeezelite
     mount_usb_drive
@@ -403,37 +433,37 @@ install_everything() {
     echo "✅ All installations completed!"
 }
 
+# =============================================================================
 # Main Menu
+# =============================================================================
 while true; do
     echo "=================================="
     echo "  Raspberry Pi Audio Setup Menu   "
     echo "=================================="
     echo "1) Install Everything"
     echo "2) Upgrade System"
-    echo "3) Configure /boot/firmware/config.txt"
-    echo "4) Install CamillaDSP & GUI"
-    echo "5) Install Lyrion Media Server & Squeezelite"
-    echo "6) Mount USB Drive"
-    echo "7) Configure Sound Levels (alsamixer)"
-    echo "8) Install Remote Script"
-    echo "9) Pair Bluetooth Remote"
-    echo "10) Reboot System"
-    echo "11) Exit"
+    echo "3) Install CamillaDSP & GUI"
+    echo "4) Install Lyrion Media Server & Squeezelite"
+    echo "5) Mount USB Drive"
+    echo "6) Configure Sound Levels (alsamixer)"
+    echo "7) Install Remote Script (GPIO/UART config + venv + service)"
+    echo "8) Pair Bluetooth Remote"
+    echo "9) Reboot System"
+    echo "10) Exit"
     echo "=================================="
-    read -p "Choose an option [1-11]: " option
+    read -p "Choose an option [1-10]: " option
 
     case $option in
         1) install_everything ;;
         2) upgrade_system ;;
-        3) configure_boot_config ;;
-        4) install_camilladsp ;;
-        5) install_lyrion_and_squeezelite ;;
-        6) mount_usb_drive ;;
-        7) set_sound_card ;;
-        8) install_bluetooth_remote ;;
-        9) pair_bluetooth_remote ;;
-        10) reboot_now ;;
-        11) echo "Exiting..."; exit 0 ;;
+        3) install_camilladsp ;;
+        4) install_lyrion_and_squeezelite ;;
+        5) mount_usb_drive ;;
+        6) set_sound_card ;;
+        7) install_bluetooth_remote ;;
+        8) pair_bluetooth_remote ;;
+        9) reboot_now ;;
+        10) echo "Exiting..."; exit 0 ;;
         *) echo "Invalid option. Please try again." ;;
     esac
 done
