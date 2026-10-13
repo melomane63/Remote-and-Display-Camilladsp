@@ -409,12 +409,12 @@ EOF
 }
 
 # =============================================================================
-# Function to reboot
+# Function to shutdown
 # =============================================================================
-reboot_now() {
-    read -p "Reboot now? (y/n): " choice
+shutdown_now() {
+    read -p "Shutdown now? (y/n): " choice
     if [[ "$choice" == "y" || "$choice" == "Y" ]]; then
-        sudo reboot
+        sudo shutdown -h now
     fi
 }
 
@@ -429,7 +429,7 @@ install_everything() {
     set_sound_card
     install_bluetooth_remote
     pair_bluetooth_remote
-    reboot_now
+    shutdown_now
     echo "✅ All installations completed!"
 }
 
@@ -448,7 +448,7 @@ while true; do
     echo "6) Configure Sound Levels (alsamixer)"
     echo "7) Install Remote Script (GPIO/UART config + venv + service)"
     echo "8) Pair Bluetooth Remote"
-    echo "9) Reboot System"
+    echo "9) Shutdown System"
     echo "10) Exit"
     echo "=================================="
     read -p "Choose an option [1-10]: " option
@@ -462,7 +462,7 @@ while true; do
         6) set_sound_card ;;
         7) install_bluetooth_remote ;;
         8) pair_bluetooth_remote ;;
-        9) reboot_now ;;
+        9) shutdown_now ;;
         10) echo "Exiting..."; exit 0 ;;
         *) echo "Invalid option. Please try again." ;;
     esac
