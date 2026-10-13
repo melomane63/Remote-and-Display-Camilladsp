@@ -133,6 +133,7 @@ devices:
     channels: 2
     device: "default"
     format: S16LE
+title: Setup
 EOL
 
     # Load ALSA loopback module
