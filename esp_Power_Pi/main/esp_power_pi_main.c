@@ -41,7 +41,7 @@
 #include "driver/uart.h"
 
 // --- ADC / LDR ---
-#define LDR_ADC_CHANNEL      ADC_CHANNEL_0   // GPIO2 = ADC1_CHANNEL_0
+#define LDR_ADC_CHANNEL      ADC_CHANNEL_0   // GPIO0 = ADC1_CHANNEL_0
 #define ADC_WIDTH            ADC_WIDTH_BIT_12
 #define ADC_ATTENUATION      ADC_ATTEN_DB_11 // plage ~0–3,6V
 
