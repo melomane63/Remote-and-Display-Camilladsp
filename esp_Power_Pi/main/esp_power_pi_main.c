@@ -494,7 +494,7 @@ static void configure_relay_gpio(void)
     io_conf.intr_type    = GPIO_INTR_DISABLE;
     gpio_config(&io_conf);
     
-    // GPIO_SHUTDOWN (GPIO9) as output, initialized to 0
+    // GPIO_SHUTDOWN (GPIO10) as output, initialized to 0
     io_conf.mode         = GPIO_MODE_OUTPUT;
     io_conf.pin_bit_mask = (1ULL << GPIO_SHUTDOWN);
     io_conf.pull_up_en   = GPIO_PULLUP_DISABLE;
