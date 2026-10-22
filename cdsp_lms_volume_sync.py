@@ -26,7 +26,7 @@ from camilladsp import CamillaClient
 DEBUG = False
 
 # --- Configuration ---
-LMS_ADDR = ("lyrionserver.local", 9090)  # echo "192.168.1.81 lyrionserver.local" | sudo tee -a /etc/hosts
+LMS_ADDR = ("lyrionserver.local", 9090)
 CAMILLA_ADDR = ("127.0.0.1", 1234)
 
 # Player MAC.
